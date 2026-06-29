@@ -18,7 +18,7 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
 
   # All other endpoints: restrict to the dashboard frontend only.
   allow do
-    origins Rails.env.production? ? ENV.fetch("FRONTEND_URL") : ENV.fetch("FRONTEND_URL", "http://localhost:3000")
+    origins Rails.env.production? ? ENV.fetch("FRONTEND_URL") { raise "FRONTEND_URL must be set in production" } : ENV.fetch("FRONTEND_URL", "http://localhost:3000")
 
     resource "*",
       headers: :any,

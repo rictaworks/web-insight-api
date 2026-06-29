@@ -37,9 +37,6 @@ class ApplicationController < ActionController::API
       required_claims: %w[exp sub]
     })
     decoded.first
-  rescue RuntimeError => e
-    Rails.logger.error "JWT configuration error: #{e.message}"
-    nil
   rescue JWT::DecodeError, ArgumentError => e
     Rails.logger.warn "JWT Decode Error: #{e.class}: #{e.message}"
     nil
@@ -47,14 +44,13 @@ class ApplicationController < ActionController::API
 
   def jwt_signing_secret
     raw = ENV['JWT_SECRET']
-    if raw.present?
-      raw
-    elsif Rails.env.production?
-      raise 'JWT_SECRET environment variable must be set in production'
-    else
-      Rails.logger.warn 'JWT_SECRET not set; falling back to secret_key_base (non-production only)'
-      Rails.application.credentials.secret_key_base
-    end
+    return raw if raw.present?
+
+    Rails.logger.warn 'JWT_SECRET not set; falling back to secret_key_base (non-production only)'
+    Rails.application.credentials.secret_key_base
+  rescue StandardError => e
+    Rails.logger.error "Failed to load JWT signing secret: #{e.class}: #{e.message}"
+    nil
   end
 
   def find_user_by_sub(sub)
@@ -75,9 +71,16 @@ class ApplicationController < ActionController::API
     sub = ENV.fetch('DEV_GOOGLE_SUB', 'dev_test_sub')
     name = ENV.fetch('DEV_DISPLAY_NAME', 'Dev Test User')
 
-    user = User.find_or_create_by(google_sub: sub) do |u|
-      u.display_name = name
+    user = begin
+      User.find_or_create_by(google_sub: sub) do |u|
+        u.display_name = name
+      end
+    rescue ActiveRecord::RecordNotUnique
+      Rails.logger.warn 'Concurrent dev user creation race; retrying find'
+      User.find_by(google_sub: sub)
     end
+
+    return nil if user.nil?
 
     unless user.persisted?
       Rails.logger.warn "Dev mock user invalid: #{user.errors.full_messages.join(', ')}"

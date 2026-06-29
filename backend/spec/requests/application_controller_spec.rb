@@ -60,7 +60,7 @@ RSpec.describe 'ApplicationController Authentication', type: :request do
         end
         stub_const('User', user_stub)
         allow(User).to receive(:find_or_create_by)
-          .with(google_sub: 'dev_test_sub').and_yield(mock_user).and_return(mock_user)
+          .with({ google_sub: 'dev_test_sub' }).and_yield(mock_user).and_return(mock_user)
         allow(mock_user).to receive(:display_name=).with('Dev Test User')
         allow(mock_user).to receive(:as_json).and_return({ 'google_sub' => 'dev_test_sub',
                                                            'display_name' => 'Dev Test User' })
