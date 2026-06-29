@@ -46,10 +46,7 @@ class ApplicationController < ActionController::API
     raw = ENV['JWT_SECRET']
     return raw if raw.present?
 
-    Rails.logger.warn 'JWT_SECRET not set; falling back to secret_key_base (non-production only)'
-    Rails.application.credentials.secret_key_base
-  rescue StandardError => e
-    Rails.logger.error "Failed to load JWT signing secret: #{e.class}: #{e.message}"
+    Rails.logger.warn 'JWT_SECRET not set; JWT authentication unavailable'
     nil
   end
 
@@ -87,6 +84,7 @@ class ApplicationController < ActionController::API
       return nil
     end
 
+    user.update(display_name: name) if user.display_name != name
     user
   end
 end
