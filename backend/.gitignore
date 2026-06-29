@@ -29,5 +29,11 @@
 !/tmp/storage/
 !/tmp/storage/.keep
 
+# Ignore local SQLite database files and WAL/SHM sidecars.
+/db/*.sqlite3
+/db/*.sqlite3-journal
+/db/*.sqlite3-shm
+/db/*.sqlite3-wal
+
 # Ignore master key for decrypting credentials and more.
 /config/master.key
