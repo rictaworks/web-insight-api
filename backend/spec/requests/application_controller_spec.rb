@@ -74,7 +74,7 @@ RSpec.describe 'ApplicationController Authentication', type: :request do
 
   context 'with JWT token' do
     let(:secret) { 'test_secret_key' }
-    let(:payload) { { 'sub' => 'google_user_123' } }
+    let(:payload) { { 'sub' => 'google_user_123', 'exp' => Time.now.to_i + 3600 } }
     let(:token) { JWT.encode(payload, secret, 'HS256') }
 
     before do

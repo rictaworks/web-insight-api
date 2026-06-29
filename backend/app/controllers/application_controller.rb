@@ -32,12 +32,25 @@ class ApplicationController < ActionController::API
   end
 
   def decode_jwt_token(token)
-    secret = ENV['JWT_SECRET'] || Rails.application.credentials.secret_key_base
-    decoded = JWT.decode(token, secret, true, { algorithm: 'HS256' })
+    decoded = JWT.decode(token, jwt_signing_secret, true, {
+      algorithm: 'HS256',
+      required_claims: %w[exp sub]
+    })
     decoded.first
-  rescue JWT::DecodeError => e
-    Rails.logger.warn "JWT Decode Error: #{e.message}"
+  rescue JWT::DecodeError, ArgumentError => e
+    Rails.logger.warn "JWT Decode Error: #{e.class}: #{e.message}"
     nil
+  end
+
+  def jwt_signing_secret
+    raw = ENV['JWT_SECRET']
+    if raw.present?
+      raw
+    elsif Rails.env.production?
+      raise 'JWT_SECRET environment variable must be set in production'
+    else
+      Rails.application.credentials.secret_key_base
+    end
   end
 
   def find_user_by_sub(sub)
@@ -50,8 +63,11 @@ class ApplicationController < ActionController::API
     # DBマイグレーションが実行されるまではモックユーザーを返さない（エラー防止）
     return nil unless ActiveRecord::Base.connection.table_exists?(:users)
 
-    User.find_or_create_by!(google_sub: 'dev_test_sub') do |user|
-      user.display_name = 'Dev Test User'
+    sub = ENV.fetch('DEV_GOOGLE_SUB', 'dev_test_sub')
+    name = ENV.fetch('DEV_DISPLAY_NAME', 'Dev Test User')
+
+    User.find_or_create_by!(google_sub: sub) do |user|
+      user.display_name = name
     end
   end
 end

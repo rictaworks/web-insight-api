@@ -6,8 +6,8 @@
 # Read more: https://github.com/cyu/rack-cors
 
 Rails.application.config.middleware.insert_before 0, Rack::Cors do
-  # Collector endpoint: allow any registered customer site origin.
-  # Authentication is enforced via X-Site-Id + X-Api-Key headers.
+  # Collect endpoint: visitor browsers authenticate via X-Site-Id + X-Api-Key only.
+  # IMPORTANT: EventsController must call skip_before_action :authenticate_user! for this endpoint.
   allow do
     origins "*"
 
@@ -18,7 +18,7 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
 
   # All other endpoints: restrict to the dashboard frontend only.
   allow do
-    origins ENV.fetch("FRONTEND_URL") { "http://localhost:3000" }
+    origins Rails.env.production? ? ENV.fetch("FRONTEND_URL") : ENV.fetch("FRONTEND_URL", "http://localhost:3000")
 
     resource "*",
       headers: :any,
