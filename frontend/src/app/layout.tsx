@@ -11,6 +11,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // TODO: lang を next-intl のロケールパラメータで動的に設定する
   return (
     <html lang="ja">
       <body>{children}</body>
