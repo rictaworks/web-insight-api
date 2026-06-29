@@ -50,7 +50,7 @@ RSpec.describe 'ApplicationController Authentication', type: :request do
     end
 
     context 'when users table exists' do
-      let(:mock_user) { double('User', google_sub: 'dev_test_sub', display_name: 'Dev Test User') }
+      let(:mock_user) { double('User', google_sub: 'dev_test_sub', display_name: 'Dev Test User', persisted?: true) }
 
       before do
         allow(ActiveRecord::Base.connection).to receive(:table_exists?).with(:users).and_return(true)

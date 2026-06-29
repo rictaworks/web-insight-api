@@ -75,8 +75,15 @@ class ApplicationController < ActionController::API
     sub = ENV.fetch('DEV_GOOGLE_SUB', 'dev_test_sub')
     name = ENV.fetch('DEV_DISPLAY_NAME', 'Dev Test User')
 
-    User.find_or_create_by(google_sub: sub) do |user|
-      user.display_name = name
+    user = User.find_or_create_by(google_sub: sub) do |u|
+      u.display_name = name
     end
+
+    unless user.persisted?
+      Rails.logger.warn "Dev mock user invalid: #{user.errors.full_messages.join(', ')}"
+      return nil
+    end
+
+    user
   end
 end
