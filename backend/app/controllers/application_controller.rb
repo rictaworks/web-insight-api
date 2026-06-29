@@ -22,7 +22,7 @@ class ApplicationController < ActionController::API
   end
 
   def decode_token_and_find_user
-    token = request.headers['Authorization']&.split&.last
+    token = request.headers['Authorization']&.split(' ', 2)&.last
     return nil unless token
 
     payload = decode_jwt_token(token)

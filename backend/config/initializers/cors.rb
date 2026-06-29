@@ -17,8 +17,14 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
   end
 
   # All other endpoints: restrict to the dashboard frontend only.
+  # NOTE: collect endpoint is listed first so rack-cors uses it (detect/first-match)
+  # and the wildcard resource never escalates methods for that path.
   allow do
     origins Rails.env.production? ? ENV.fetch("FRONTEND_URL") { raise "FRONTEND_URL must be set in production" } : ENV.fetch("FRONTEND_URL", "http://localhost:3000")
+
+    resource "/api/v1/events/collect",
+      headers: [ "Content-Type", "X-Site-Id", "X-Api-Key" ],
+      methods: [ :post, :options ]
 
     resource "*",
       headers: :any,
