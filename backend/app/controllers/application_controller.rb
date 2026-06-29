@@ -37,6 +37,9 @@ class ApplicationController < ActionController::API
       required_claims: %w[exp sub]
     })
     decoded.first
+  rescue RuntimeError => e
+    Rails.logger.error "JWT configuration error: #{e.message}"
+    nil
   rescue JWT::DecodeError, ArgumentError => e
     Rails.logger.warn "JWT Decode Error: #{e.class}: #{e.message}"
     nil
@@ -49,24 +52,30 @@ class ApplicationController < ActionController::API
     elsif Rails.env.production?
       raise 'JWT_SECRET environment variable must be set in production'
     else
+      Rails.logger.warn 'JWT_SECRET not set; falling back to secret_key_base (non-production only)'
       Rails.application.credentials.secret_key_base
     end
   end
 
   def find_user_by_sub(sub)
-    return nil unless ActiveRecord::Base.connection.table_exists?(:users)
+    unless ActiveRecord::Base.connection.table_exists?(:users)
+      Rails.logger.warn 'users table not found, skipping auth lookup'
+      return nil
+    end
 
     User.find_by(google_sub: sub)
   end
 
   def mock_development_user
-    # DBマイグレーションが実行されるまではモックユーザーを返さない（エラー防止）
-    return nil unless ActiveRecord::Base.connection.table_exists?(:users)
+    unless ActiveRecord::Base.connection.table_exists?(:users)
+      Rails.logger.warn 'users table not found, cannot create dev mock user'
+      return nil
+    end
 
     sub = ENV.fetch('DEV_GOOGLE_SUB', 'dev_test_sub')
     name = ENV.fetch('DEV_DISPLAY_NAME', 'Dev Test User')
 
-    User.find_or_create_by!(google_sub: sub) do |user|
+    User.find_or_create_by(google_sub: sub) do |user|
       user.display_name = name
     end
   end

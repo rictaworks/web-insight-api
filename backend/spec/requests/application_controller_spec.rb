@@ -31,7 +31,11 @@ RSpec.describe 'ApplicationController Authentication', type: :request do
   context 'in development environment with DEV_AUTO_LOGIN=true' do
     before do
       allow(Rails.env).to receive(:development?).and_return(true)
-      stub_const('ENV', ENV.to_h.merge('DEV_AUTO_LOGIN' => 'true'))
+      stub_const('ENV', ENV.to_h.merge(
+        'DEV_AUTO_LOGIN' => 'true',
+        'DEV_GOOGLE_SUB' => 'dev_test_sub',
+        'DEV_DISPLAY_NAME' => 'Dev Test User'
+      ))
     end
 
     context 'when users table does not exist yet' do
@@ -52,10 +56,10 @@ RSpec.describe 'ApplicationController Authentication', type: :request do
         allow(ActiveRecord::Base.connection).to receive(:table_exists?).with(:users).and_return(true)
         # Stub User model with dummy class methods to prevent RSpec signature errors
         user_stub = Class.new do
-          def self.find_or_create_by!(*args); end
+          def self.find_or_create_by(*args); end
         end
         stub_const('User', user_stub)
-        allow(User).to receive(:find_or_create_by!)
+        allow(User).to receive(:find_or_create_by)
           .with(google_sub: 'dev_test_sub').and_yield(mock_user).and_return(mock_user)
         allow(mock_user).to receive(:display_name=).with('Dev Test User')
         allow(mock_user).to receive(:as_json).and_return({ 'google_sub' => 'dev_test_sub',
