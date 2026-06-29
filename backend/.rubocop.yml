@@ -1,0 +1,26 @@
+plugins:
+  - rubocop-rails
+
+AllCops:
+  NewCops: enable
+  Exclude:
+    - "db/schema.rb"
+    - "db/migrate/*"
+    - "bin/*"
+    - "config/initializers/*"
+    - "config/environments/*"
+    - "config/application.rb"
+    - "config/boot.rb"
+    - "config/puma.rb"
+    - "node_modules/**/*"
+    - "vendor/**/*"
+
+Metrics/BlockLength:
+  Exclude:
+    - "spec/**/*"
+
+Style/Documentation:
+  Enabled: false
+
+Style/FrozenStringLiteralComment:
+  Enabled: false

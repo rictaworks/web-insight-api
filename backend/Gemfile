@@ -1,0 +1,47 @@
+source 'https://rubygems.org'
+
+ruby '3.4.7'
+
+gem 'rails', '~> 7.1.6'
+
+# Use the Puma web server [https://github.com/puma/puma]
+gem 'puma', '>= 5.0'
+
+# JWT gem for token-based authentication
+gem 'jwt', '~> 2.8'
+
+# Windows does not include zoneinfo files, so bundle the tzinfo-data gem
+gem 'tzinfo-data', platforms: %i[windows jruby]
+
+# Reduces boot times through caching; required in config/boot.rb
+gem 'bootsnap', require: false
+
+# Use Rack CORS for handling Cross-Origin Resource Sharing (CORS), making cross-origin Ajax possible
+gem 'rack-cors'
+
+# Use postgresql in production environment
+group :production do
+  gem 'pg', '~> 1.1'
+end
+
+# Load .env file in development environment
+group :development do
+  gem 'dotenv-rails', '~> 3.1'
+end
+
+# Use sqlite3 in development and test environments
+group :development, :test do
+  gem 'sqlite3', '~> 1.4'
+
+  # RSpec testing framework
+  gem 'rspec-rails', '~> 6.1.0'
+
+  # FactoryBot for test data generation
+  gem 'factory_bot_rails', '~> 6.4'
+
+  # RuboCop Rails style guide check
+  gem 'rubocop-rails', require: false
+
+  # Debugging tools
+  gem 'debug', platforms: %i[mri windows]
+end

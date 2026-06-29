@@ -19,6 +19,8 @@ app-ui/
 # Ruby / Rails
 config/master.key
 config/credentials/*.key
+backend/config/master.key
+backend/config/credentials/*.key
 *.rbc
 capybara-*.html
 .rspec
