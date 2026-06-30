@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# web-insight-api フロントエンド
 
-## Getting Started
+Next.js 14（App Router / TypeScript）で構築されたフロントエンドです。
 
-First, run the development server:
+---
+
+## セットアップ
+
+```bash
+cd frontend
+cp .env.example .env.local
+# .env.local に NEXT_PUBLIC_API_BASE_URL を設定する
+npm install
+```
+
+## 開発サーバー起動
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+http://localhost:3000 にアクセスして確認。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+バックエンド API（Rails）は別途 http://localhost:3001 で起動している必要があります。
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## コマンド
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run dev        # 開発サーバー起動（port 3000）
+npm run build      # プロダクションビルド
+npm run lint       # ESLint
+npm test           # Jest（単体テスト）
+npm run test:e2e   # Playwright（E2E テスト）
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 環境変数
 
-## Deploy on Vercel
+`.env.example` をコピーして `.env.local` を作成:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| 変数名 | 説明 |
+|--------|------|
+| `NEXT_PUBLIC_API_BASE_URL` | バックエンド API の URL（例: `http://localhost:3001`） |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## 技術スタック
+
+| ライブラリ | 用途 |
+|-----------|------|
+| Next.js 14 | フレームワーク（App Router） |
+| TypeScript | 型安全 |
+| next-intl | 多言語対応（ja / en / fr / zh / ru / es / ar） |
+| next-auth | Google OAuth 認証 |
+| Font Awesome 6 | アイコン |
+| Recharts | グラフ描画 |
+| Jest + React Testing Library | 単体テスト |
+| Playwright | E2E テスト |
+
+---
+
+## デプロイ
+
+Vercel へのデプロイ詳細: [ENV/PRODUCTION.md](../ENV/PRODUCTION.md)

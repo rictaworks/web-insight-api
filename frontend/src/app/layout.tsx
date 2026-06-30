@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { defaultLocale } from "@/config/i18n";
 
 export const metadata: Metadata = {
   title: "web-insight-api",
@@ -11,9 +12,8 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // TODO: lang を next-intl のロケールパラメータで動的に設定する
   return (
-    <html lang="ja">
+    <html lang={defaultLocale}>
       <body>{children}</body>
     </html>
   );
