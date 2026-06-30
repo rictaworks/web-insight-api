@@ -32,10 +32,10 @@ RSpec.describe 'ApplicationController Authentication', type: :request do
     before do
       allow(Rails.env).to receive(:development?).and_return(true)
       stub_const('ENV', ENV.to_h.merge(
-        'DEV_AUTO_LOGIN' => 'true',
-        'DEV_GOOGLE_SUB' => 'dev_test_sub',
-        'DEV_DISPLAY_NAME' => 'Dev Test User'
-      ))
+                          'DEV_AUTO_LOGIN' => 'true',
+                          'DEV_GOOGLE_SUB' => 'dev_test_sub',
+                          'DEV_DISPLAY_NAME' => 'Dev Test User'
+                        ))
     end
 
     context 'when users table does not exist yet' do
