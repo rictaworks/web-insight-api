@@ -41,8 +41,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## ブランチ規約
 
 - `main` ブランチでの直接作業を禁止する
-- `src/*` の変更は必ず PR を作成する（直接 push 禁止）
-- `src/*` 以外は main への push を許可する
+- `backend/**` の変更は必ず PR を作成する（直接 push 禁止）
+- `backend/**` 以外は main への push を許可する
 
 ---
 
@@ -51,10 +51,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | フェーズ | 担当 |
 |---------|------|
 | 設計・Issue 発行 | Claude Sonnet |
-| 1次実装 | Antigravity 3.5Flash |
+| 1次実装 | AntigravityCLI |
 | コードレビュー | Claude Sonnet |
 | テスト作成・実行 | Claude Sonnet |
-| セキュリティレビュー | Codex GPT5.5 |
+| セキュリティレビュー | Codex |
 
 ---
 
@@ -66,6 +66,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - commit 前に必ずセキュリティレビューを実施する
 - PR に非エンジニア向けユーザーテスト手順を丁寧に記載する
 
+## リリースフロー
+
+1. 各 Issue を AI 役割分担に従い実装・レビュー・マージ
+2. **全 Issue 完了後** に人力コードレビューを実施する
+3. **全 Issue 完了後** にユーザーテスト（実機確認）を実施する
+
+---
+
+## コマンド
+
+すべてのコマンドは `backend/` ディレクトリ内で実行する。
+
+```bash
+# 依存インストール
+bundle install
+
+# DB セットアップ
+bin/rails db:prepare
+
+# 開発サーバー起動（port 3001）
+bin/rails server
+
+# テスト（RSpec）
+bundle exec rspec                        # 全テスト
+bundle exec rspec spec/requests/foo_spec.rb  # 個別ファイル
+
+# Lint
+bundle exec rubocop                      # チェック
+bundle exec rubocop -A                   # 自動修正
+```
+
+**起動時チェック（本番）**: `JWT_SECRET` と `FRONTEND_URL` が未設定の場合、サーバーが起動時に即 raise する。Railway Variables に必ず設定すること。
+
 ---
 
 ## コード規約
@@ -73,7 +106,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **フォールバック禁止**: 例外処理を必ず書く（握りつぶしや暗黙的な代替値禁止）
 - **デバッグトレース**: ログ・トレースを残せるコードを書く
 - **グローバル変数禁止**: セキュリティの観点から使用しない
-- **文字列リテラル**: ハードコードせず設定ファイルまたは DB に分離する
+- **文字列リテラル**: ハードコードせず設定ファイルまたは DB に分離する。ハードコードを検出するテストを必ず書く
 - **関数・クラス**: 制御構文・条件構文以外はクラスまたは関数に書く
 - **モーダル**: ネイティブ `alert()` / `confirm()` / `prompt()` はプロジェクト全体で使用禁止
 - **アイコン**: Font Awesome を使用する（絵文字禁止）
@@ -98,13 +131,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```
 RAILS_MASTER_KEY
+JWT_SECRET                  # 本番必須・未設定で起動不可
+FRONTEND_URL                # 本番必須・未設定で起動不可（例: https://your-app.vercel.app）
 GOOGLE_OAUTH_CLIENT_ID
 GOOGLE_OAUTH_CLIENT_SECRET
 LANGSMITH_API_KEY
 DATABASE_URL
 RECAPTCHA_SITE_KEY
 RECAPTCHA_SECRET_KEY
+DEV_AUTO_LOGIN              # 開発環境のみ: true で Google OAuth をバイパス（本番は false または未設定）
 ```
+
+---
+
+## 自社開発ポリシー
+
+- **画像**: AI 生成を使用する
+- **ライティング**: writer エージェントに依頼する
+- **OSS 優先**: 安全なライブラリ・フレームワーク・OSS・SaaS を活用し、車輪の再発明を避けてオリジナルコードを最小限に保つ
+- **アーキテクチャ**: 規模に応じてマイクロサービス・MVC・API Gateway・メッセージングを意識する
+- **技術スタック基本**: Next.js + Rails + PostgreSQL。AI/解析/画像加工が必要な場合は FastAPI、高速並列/リアルタイム通信が必要な場合は Gin を追加してもよい
+- **デプロイ先**: フロントは Vercel（無料）、バックエンド・管理画面は Railway または Render（無料）
+- **ドメイン**: rictaworks.jp のサブドメインを原則とする
+- **デプロイ以降の作業**: ウェブはデプロイから先、デスクトップ・スマホはビルドから先、ESP32 は焼き込みから先は ClaudeDesktop で作業する
 
 ---
 
