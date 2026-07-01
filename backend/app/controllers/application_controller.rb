@@ -44,10 +44,13 @@ class ApplicationController < ActionController::API
 
   def jwt_signing_secret
     raw = ENV.fetch('JWT_SECRET', nil)
-    return raw if raw.present?
+    if raw.blank?
+      raise 'JWT_SECRET is not configured' if Rails.env.production?
 
-    Rails.logger.warn 'JWT_SECRET not set; JWT authentication unavailable'
-    nil
+      Rails.logger.warn 'JWT_SECRET not set; JWT authentication unavailable'
+      return nil
+    end
+    raw
   end
 
   def find_user_by_sub(sub)

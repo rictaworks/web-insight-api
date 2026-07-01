@@ -1,7 +1,5 @@
 class CreateRemainingTables < ActiveRecord::Migration[7.1]
   def change
-    enable_extension "pgcrypto" if connection.adapter_name =~ /postg/i
-
     # 1. sites
     create_table :sites, id: :string do |t|
       t.references :user, type: :string, null: false, foreign_key: true
@@ -18,7 +16,7 @@ class CreateRemainingTables < ActiveRecord::Migration[7.1]
     # 2. sessions
     create_table :sessions, id: :string do |t|
       t.references :site, type: :string, null: false, foreign_key: true
-      t.string :fingerprint
+      t.string :fingerprint, null: false
       t.string :channel
       t.string :utm_source
       t.string :utm_medium
@@ -32,7 +30,7 @@ class CreateRemainingTables < ActiveRecord::Migration[7.1]
     create_table :events, id: :string do |t|
       t.references :site, type: :string, null: false, foreign_key: true
       t.references :session, type: :string, null: false, foreign_key: true
-      t.string :event_type
+      t.string :event_type, null: false
       t.string :page_url
       t.string :referrer
       t.string :user_agent
@@ -91,8 +89,8 @@ class CreateRemainingTables < ActiveRecord::Migration[7.1]
     # 7. alert_logs
     create_table :alert_logs, id: :string do |t|
       t.references :alert_rule, type: :string, null: false, foreign_key: true
-      t.datetime :fired_at
-      t.decimal :metric_value, precision: 12, scale: 4
+      t.datetime :fired_at, null: false
+      t.decimal :metric_value, precision: 12, scale: 4, null: false
       t.datetime :created_at, null: false
     end
 

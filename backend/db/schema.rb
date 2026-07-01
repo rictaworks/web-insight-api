@@ -31,8 +31,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_30_000002) do
 
   create_table "alert_logs", id: :string, force: :cascade do |t|
     t.string "alert_rule_id", null: false
-    t.datetime "fired_at"
-    t.decimal "metric_value", precision: 12, scale: 4
+    t.datetime "fired_at", null: false
+    t.decimal "metric_value", precision: 12, scale: 4, null: false
     t.datetime "created_at", null: false
     t.index ["alert_rule_id"], name: "index_alert_logs_on_alert_rule_id"
   end
@@ -90,7 +90,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_30_000002) do
   create_table "events", id: :string, force: :cascade do |t|
     t.string "site_id", null: false
     t.string "session_id", null: false
-    t.string "event_type"
+    t.string "event_type", null: false
     t.string "page_url"
     t.string "referrer"
     t.string "user_agent"
@@ -123,7 +123,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_30_000002) do
 
   create_table "sessions", id: :string, force: :cascade do |t|
     t.string "site_id", null: false
-    t.string "fingerprint"
+    t.string "fingerprint", null: false
     t.string "channel"
     t.string "utm_source"
     t.string "utm_medium"

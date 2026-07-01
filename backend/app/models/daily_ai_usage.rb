@@ -3,6 +3,6 @@ class DailyAiUsage < ApplicationRecord
 
   belongs_to :site
 
-  validates :usage_date, presence: true
+  validates :usage_date, presence: true, uniqueness: { scope: :site_id }
   validates :used_count, presence: true
 end

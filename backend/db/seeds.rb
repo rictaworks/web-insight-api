@@ -1,4 +1,7 @@
 # Seed master data idempotently
+# These lookup records are required in all environments (development / test / production).
+# If adding environment-specific data in the future, wrap it in Rails.env.development? blocks.
+raise "Unsupported Rails environment: #{Rails.env}" unless Rails.env.local? || Rails.env.production?
 
 event_types = %w[pageview click scroll custom]
 event_types.each do |name|
