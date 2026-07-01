@@ -33,9 +33,9 @@ class ApplicationController < ActionController::API
 
   def decode_jwt_token(token)
     decoded = JWT.decode(token, jwt_signing_secret, true, {
-      algorithm: 'HS256',
-      required_claims: %w[exp sub]
-    })
+                           algorithm: 'HS256',
+                           required_claims: %w[exp sub]
+                         })
     decoded.first
   rescue JWT::DecodeError, ArgumentError => e
     Rails.logger.warn "JWT Decode Error: #{e.class}: #{e.message}"
@@ -43,11 +43,14 @@ class ApplicationController < ActionController::API
   end
 
   def jwt_signing_secret
-    raw = ENV['JWT_SECRET']
-    return raw if raw.present?
+    raw = ENV.fetch('JWT_SECRET', nil)
+    if raw.blank?
+      raise 'JWT_SECRET is not configured' if Rails.env.production?
 
-    Rails.logger.warn 'JWT_SECRET not set; JWT authentication unavailable'
-    nil
+      Rails.logger.warn 'JWT_SECRET not set; JWT authentication unavailable'
+      return nil
+    end
+    raw
   end
 
   def find_user_by_sub(sub)

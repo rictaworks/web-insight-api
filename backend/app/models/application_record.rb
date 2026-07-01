@@ -6,6 +6,12 @@ class ApplicationRecord < ActiveRecord::Base
   private
 
   def assign_uuid
+    pk = self.class.primary_key
+    return unless pk
+
+    col = self.class.columns_hash[pk]
+    return if col && %i[string uuid].exclude?(col.type)
+
     self.id ||= SecureRandom.uuid
   end
 end
