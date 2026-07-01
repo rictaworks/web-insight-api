@@ -11,7 +11,7 @@ module Api
         end
 
         auth_code = params[:auth_code]
-        if auth_code.blank?
+        if !auth_code.is_a?(String) || auth_code.blank?
           render json: { error: 'auth_code is required' }, status: :bad_request
           return
         end
@@ -19,8 +19,17 @@ module Api
         process_google_auth(auth_code)
       end
 
+      VALIDATOR_MUTEX = Mutex.new
+      private_constant :VALIDATOR_MUTEX
+
+      GOOGLE_NETWORK_ERRORS = [
+        SystemCallError, Timeout::Error, SocketError, EOFError, IOError,
+        OpenSSL::SSL::SSLError, Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError
+      ].freeze
+      private_constant :GOOGLE_NETWORK_ERRORS
+
       def self.google_id_token_validator
-        @google_id_token_validator ||= GoogleIDToken::Validator.new
+        VALIDATOR_MUTEX.synchronize { @google_id_token_validator ||= GoogleIDToken::Validator.new }
       end
 
       private
@@ -40,12 +49,17 @@ module Api
         end
 
         user = upsert_user_from_payload(payload)
+        unless user
+          render json: { error: 'Failed to create or find user' }, status: :internal_server_error
+          return
+        end
         render_auth_success(user)
       end
       # rubocop:enable Metrics/MethodLength
 
       def id_token_shaped?(value)
-        value.count('.') == 2
+        parts = value.split('.')
+        parts.length == 3 && parts.all? { |p| p.match?(/\A[A-Za-z0-9_-]+\z/) }
       end
 
       def handle_dev_auto_login
@@ -60,7 +74,7 @@ module Api
       # rubocop:disable Metrics/MethodLength
       def upsert_user_from_payload(payload)
         google_sub = payload['sub']
-        display_name = payload['name'] || 'Google User'
+        display_name = payload['name'].presence || 'Google User'
 
         user = begin
           User.find_or_create_by!(google_sub: google_sub) do |u|
@@ -69,6 +83,8 @@ module Api
         rescue ActiveRecord::RecordNotUnique
           User.find_by(google_sub: google_sub)
         end
+
+        return nil unless user
 
         user.update(display_name: display_name) if user.display_name != display_name
         user
@@ -103,7 +119,7 @@ module Api
         end
 
         JSON.parse(res.body)['id_token']
-      rescue StandardError => e
+      rescue JSON::ParserError, *GOOGLE_NETWORK_ERRORS => e
         Rails.logger.error "Google OAuth token exchange error: #{e.class}: #{e.message}"
         nil
       end
@@ -114,7 +130,7 @@ module Api
           code: auth_code,
           client_id: client_id,
           client_secret: client_secret,
-          redirect_uri: params[:redirect_uri] || 'postmessage',
+          redirect_uri: params[:redirect_uri].to_s.presence || 'postmessage',
           grant_type: 'authorization_code'
         }
       end
@@ -127,7 +143,8 @@ module Api
         end
 
         self.class.google_id_token_validator.check(id_token, client_id)
-      rescue StandardError => e
+      rescue GoogleIDToken::ValidationError, GoogleIDToken::CertificateError,
+             JSON::ParserError, OpenSSL::X509::CertificateError, *GOOGLE_NETWORK_ERRORS => e
         Rails.logger.warn "Google ID Token validation failed: #{e.class}: #{e.message}"
         nil
       end
