@@ -36,7 +36,14 @@
 | タイトル | イベント収集（pageview / click / scroll / custom） |
 | エンドポイント | `POST /events/collect` |
 
-**ヘッダー**: `X-Site-Id: <site_id>`, `X-Api-Key: <api_key>`
+**ヘッダー**: `X-Site-Id: <site_id>`, `X-Api-Key: <signature>`
+
+`X-Api-Key` は生の API キーではなく、リクエストボディ（JSON 文字列）を
+サイトの `api_key` を鍵として HMAC-SHA256 署名した16進数文字列を送信する。
+
+```
+signature = HMAC-SHA256(key: site.api_key, message: raw_request_body).hexdigest
+```
 
 **リクエスト（例: pageview）**
 ```json
