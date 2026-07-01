@@ -77,14 +77,15 @@ module Api
         display_name = payload['name'].presence || 'Google User'
 
         user = begin
-          User.find_or_create_by!(google_sub: google_sub) do |u|
+          User.find_or_create_by(google_sub: google_sub) do |u|
             u.display_name = display_name
           end
         rescue ActiveRecord::RecordNotUnique
+          Rails.logger.warn 'Concurrent user creation race; retrying find'
           User.find_by(google_sub: google_sub)
         end
 
-        return nil unless user
+        return nil unless user&.persisted?
 
         user.update(display_name: display_name) if user.display_name != display_name
         user
