@@ -1,6 +1,7 @@
 class ApiSignatureVerification
   EVENTS_PATH_PATTERN = %r{\A/api/v1/events(/|\z)}
   MAX_BODY_BYTES = 32 * 1024
+  TIMESTAMP_TOLERANCE_SECONDS = 300
 
   def initialize(app)
     @app = app
@@ -23,24 +24,39 @@ class ApiSignatureVerification
   end
 
   def verify_signature(request, env)
-    site_id = request.headers['X-Site-Id']
-    api_key_sig = request.headers['X-Api-Key']
-
-    return unauthorized_response('missing X-Site-Id or X-Api-Key header') if site_id.blank? || api_key_sig.blank?
-
+    site_id, api_key_sig, timestamp = request_credentials(request)
     body, oversized = read_body(request)
-    return unauthorized_response("request body exceeds #{MAX_BODY_BYTES} bytes (site_id=#{site_id})") if oversized
+
+    error = credential_error(site_id, api_key_sig, timestamp, oversized)
+    return unauthorized_response(error) if error
 
     site = Site.find_by(id: site_id)
-    unless site && valid_signature?(body, site.api_key, api_key_sig)
+    unless site && valid_signature?(timestamp, body, site.api_key, api_key_sig)
       return unauthorized_response("signature verification failed (site_id=#{site_id})")
     end
 
     @app.call(env)
   end
 
-  def valid_signature?(body, api_key, provided_sig)
-    expected_sig = OpenSSL::HMAC.hexdigest('SHA256', api_key, body)
+  def request_credentials(request)
+    [request.headers['X-Site-Id'], request.headers['X-Api-Key'], request.headers['X-Timestamp']]
+  end
+
+  def credential_error(site_id, api_key_sig, timestamp, oversized)
+    return 'missing X-Site-Id, X-Api-Key or X-Timestamp header' if [site_id, api_key_sig, timestamp].any?(&:blank?)
+    return "timestamp out of tolerance (site_id=#{site_id})" unless fresh_timestamp?(timestamp)
+
+    "request body exceeds #{MAX_BODY_BYTES} bytes (site_id=#{site_id})" if oversized
+  end
+
+  def fresh_timestamp?(timestamp)
+    return false unless timestamp.match?(/\A-?\d+\z/)
+
+    (Time.now.to_i - timestamp.to_i).abs <= TIMESTAMP_TOLERANCE_SECONDS
+  end
+
+  def valid_signature?(timestamp, body, api_key, provided_sig)
+    expected_sig = OpenSSL::HMAC.hexdigest('SHA256', api_key, "#{timestamp}.#{body}")
     ActiveSupport::SecurityUtils.secure_compare(expected_sig, provided_sig)
   end
 

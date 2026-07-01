@@ -12,7 +12,7 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
     origins "*"
 
     resource "/api/v1/events/collect",
-      headers: [ "Content-Type", "X-Site-Id", "X-Api-Key" ],
+      headers: [ "Content-Type", "X-Site-Id", "X-Api-Key", "X-Timestamp" ],
       methods: [ :post, :options ]
   end
 
@@ -23,7 +23,7 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
     origins Rails.env.production? ? ENV.fetch("FRONTEND_URL") { raise "FRONTEND_URL must be set in production" } : ENV.fetch("FRONTEND_URL", "http://localhost:3000")
 
     resource "/api/v1/events/collect",
-      headers: [ "Content-Type", "X-Site-Id", "X-Api-Key" ],
+      headers: [ "Content-Type", "X-Site-Id", "X-Api-Key", "X-Timestamp" ],
       methods: [ :post, :options ]
 
     resource "*",
