@@ -52,8 +52,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
     let(:body_content) { { event_type: 'pageview', page_url: '/' }.to_json }
     let(:now) { 1_700_000_000 }
 
-    before { travel_to Time.at(now) }
-    after { travel_back }
+    around { |example| travel_to(Time.zone.at(now)) { example.run } }
 
     it 'returns a generic 401 if X-Site-Id is missing' do
       status, _, body = make_request(

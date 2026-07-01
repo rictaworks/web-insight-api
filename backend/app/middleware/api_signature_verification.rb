@@ -1,7 +1,11 @@
 class ApiSignatureVerification
   EVENTS_PATH_PATTERN = %r{\A/api/v1/events(/|\z)}
   MAX_BODY_BYTES = 32 * 1024
-  TIMESTAMP_TOLERANCE_SECONDS = 300
+  TIMESTAMP_TOLERANCE_SECONDS = ENV.fetch('API_TIMESTAMP_TOLERANCE_SECONDS', 300).to_i
+
+  SITE_ID_HEADER = 'X-Site-Id'.freeze
+  API_KEY_HEADER = 'X-Api-Key'.freeze
+  TIMESTAMP_HEADER = 'X-Timestamp'.freeze
 
   def initialize(app)
     @app = app
@@ -25,10 +29,12 @@ class ApiSignatureVerification
 
   def verify_signature(request, env)
     site_id, api_key_sig, timestamp = request_credentials(request)
-    body, oversized = read_body(request)
 
-    error = credential_error(site_id, api_key_sig, timestamp, oversized)
+    error = header_error(site_id, api_key_sig, timestamp)
     return unauthorized_response(error) if error
+
+    body, oversized = read_body(request)
+    return unauthorized_response("request body exceeds #{MAX_BODY_BYTES} bytes (site_id=#{site_id})") if oversized
 
     site = Site.find_by(id: site_id)
     unless site && valid_signature?(timestamp, body, site.api_key, api_key_sig)
@@ -38,21 +44,21 @@ class ApiSignatureVerification
     @app.call(env)
   end
 
-  def request_credentials(request)
-    [request.headers['X-Site-Id'], request.headers['X-Api-Key'], request.headers['X-Timestamp']]
+  def header_error(site_id, api_key_sig, timestamp)
+    return 'missing X-Site-Id, X-Api-Key or X-Timestamp header' if [site_id, api_key_sig, timestamp].any?(&:blank?)
+
+    "timestamp out of tolerance (site_id=#{site_id})" unless fresh_timestamp?(timestamp)
   end
 
-  def credential_error(site_id, api_key_sig, timestamp, oversized)
-    return 'missing X-Site-Id, X-Api-Key or X-Timestamp header' if [site_id, api_key_sig, timestamp].any?(&:blank?)
-    return "timestamp out of tolerance (site_id=#{site_id})" unless fresh_timestamp?(timestamp)
-
-    "request body exceeds #{MAX_BODY_BYTES} bytes (site_id=#{site_id})" if oversized
+  def request_credentials(request)
+    [request.headers[SITE_ID_HEADER], request.headers[API_KEY_HEADER], request.headers[TIMESTAMP_HEADER]]
   end
 
   def fresh_timestamp?(timestamp)
-    return false unless timestamp.match?(/\A-?\d+\z/)
+    parsed = Integer(timestamp, exception: false)
+    return false unless parsed
 
-    (Time.now.to_i - timestamp.to_i).abs <= TIMESTAMP_TOLERANCE_SECONDS
+    (Time.now.to_i - parsed).abs <= TIMESTAMP_TOLERANCE_SECONDS
   end
 
   def valid_signature?(timestamp, body, api_key, provided_sig)
@@ -71,12 +77,16 @@ class ApiSignatureVerification
   end
 
   def unauthorized_response(log_reason)
-    Rails.logger.warn("ApiSignatureVerification: #{log_reason}")
+    Rails.logger.warn("ApiSignatureVerification: #{sanitize_for_log(log_reason)}")
 
     [
       401,
-      { 'Content-Type' => 'application/json' },
+      { 'Content-Type' => 'application/json', 'Date' => Time.now.httpdate },
       [{ error: 'Unauthorized' }.to_json]
     ]
+  end
+
+  def sanitize_for_log(message)
+    message.gsub(/[[:cntrl:]]/, '')
   end
 end
