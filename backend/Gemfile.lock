@@ -110,6 +110,8 @@ GEM
       railties (>= 6.1.0)
     globalid (1.4.0)
       activesupport (>= 6.1)
+    google-id-token (1.4.2)
+      jwt (>= 1)
     i18n (1.15.2)
       concurrent-ruby (~> 1.0)
     io-console (0.8.2)
@@ -289,6 +291,7 @@ DEPENDENCIES
   debug
   dotenv-rails (~> 3.1)
   factory_bot_rails (~> 6.4)
+  google-id-token (~> 1.4)
   jwt (~> 2.8)
   pg (~> 1.1)
   puma (>= 5.0)

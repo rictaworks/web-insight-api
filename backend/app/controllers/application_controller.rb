@@ -62,6 +62,7 @@ class ApplicationController < ActionController::API
     User.find_by(google_sub: sub)
   end
 
+  # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
   def mock_development_user
     unless ActiveRecord::Base.connection.table_exists?(:users)
       Rails.logger.warn 'users table not found, cannot create dev mock user'
@@ -90,4 +91,5 @@ class ApplicationController < ActionController::API
     user.update(display_name: name) if user.display_name != name
     user
   end
+  # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
 end
