@@ -36,13 +36,21 @@
 | タイトル | イベント収集（pageview / click / scroll / custom） |
 | エンドポイント | `POST /events/collect` |
 
-**ヘッダー**: `X-Site-Id: <site_id>`, `X-Api-Key: <signature>`
+**ヘッダー**: `X-Site-Id: <site_id>`, `X-Api-Key: <signature>`, `X-Timestamp: <unix_epoch_seconds>`
 
-`X-Api-Key` は生の API キーではなく、リクエストボディ（JSON 文字列）を
+`X-Api-Key` は生の API キーではなく、`X-Timestamp` とリクエストボディ（JSON 文字列）を
 サイトの `api_key` を鍵として HMAC-SHA256 署名した16進数文字列を送信する。
+`X-Timestamp` はリクエスト送信時刻の UNIX 秒。サーバー時刻との差が
+±300 秒（5分、`API_TIMESTAMP_TOLERANCE_SECONDS` 環境変数で変更可）を超える場合は 401 を返し、
+キャプチャ済みリクエストを長期間にわたって再送できないようにする
+（許容時間内の再送そのものを防ぐものではない）。
+
+401 応答には `Date` レスポンスヘッダーが付与される。クライアントの時計がずれている場合、
+この値を用いて自身の時計とのオフセットを補正できる。ブラウザから `fetch`/`XHR` で
+この値を読み取れるよう、CORS設定で `Date` を `Access-Control-Expose-Headers` に含めている。
 
 ```
-signature = HMAC-SHA256(key: site.api_key, message: raw_request_body).hexdigest
+signature = HMAC-SHA256(key: site.api_key, message: "#{X-Timestamp}.#{raw_request_body}").hexdigest
 ```
 
 **リクエスト（例: pageview）**

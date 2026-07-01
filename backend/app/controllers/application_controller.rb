@@ -38,7 +38,7 @@ class ApplicationController < ActionController::API
                          })
     decoded.first
   rescue JWT::DecodeError, ArgumentError => e
-    Rails.logger.warn "JWT Decode Error: #{e.class}: #{e.message}"
+    Rails.logger.warn "JWT Decode Error: #{e.class}: #{LogSanitizer.strip_control_characters(e.message)}"
     nil
   end
 

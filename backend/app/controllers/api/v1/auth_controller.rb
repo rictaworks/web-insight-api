@@ -120,16 +120,20 @@ module Api
 
         res = Net::HTTP.post_form(uri, exchange_params(auth_code, client_id, client_secret))
         unless res.is_a?(Net::HTTPSuccess)
-          Rails.logger.error "Google Token Exchange failed: #{res.code} - #{res.body}"
+          Rails.logger.error "Google Token Exchange failed: #{res.code} - #{sanitized(res.body)}"
           return nil
         end
 
         JSON.parse(res.body)['id_token']
       rescue JSON::ParserError, *GOOGLE_NETWORK_ERRORS => e
-        Rails.logger.error "Google OAuth token exchange error: #{e.class}: #{e.message}"
+        Rails.logger.error "Google OAuth token exchange error: #{e.class}: #{sanitized(e.message)}"
         nil
       end
       # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
+
+      def sanitized(text)
+        LogSanitizer.strip_control_characters(text)
+      end
 
       def exchange_params(auth_code, client_id, client_secret)
         {
@@ -151,7 +155,7 @@ module Api
         self.class.google_id_token_validator.check(id_token, client_id)
       rescue GoogleIDToken::ValidationError, GoogleIDToken::CertificateError,
              JSON::ParserError, OpenSSL::X509::CertificateError, *GOOGLE_NETWORK_ERRORS => e
-        Rails.logger.warn "Google ID Token validation failed: #{e.class}: #{e.message}"
+        Rails.logger.warn "Google ID Token validation failed: #{e.class}: #{sanitized(e.message)}"
         nil
       end
 

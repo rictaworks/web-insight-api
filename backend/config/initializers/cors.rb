@@ -12,19 +12,21 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
     origins "*"
 
     resource "/api/v1/events/collect",
-      headers: [ "Content-Type", "X-Site-Id", "X-Api-Key" ],
-      methods: [ :post, :options ]
+      headers: [
+        "Content-Type",
+        ApiSignatureVerification::SITE_ID_HEADER,
+        ApiSignatureVerification::API_KEY_HEADER,
+        ApiSignatureVerification::TIMESTAMP_HEADER
+      ],
+      methods: [ :post, :options ],
+      expose: [ "Date" ]
   end
 
   # All other endpoints: restrict to the dashboard frontend only.
-  # NOTE: collect endpoint is listed first so rack-cors uses it (detect/first-match)
-  # and the wildcard resource never escalates methods for that path.
+  # NOTE: the "*" origin block above always matches the collect resource first,
+  # so listing it again here would be unreachable dead code.
   allow do
     origins Rails.env.production? ? ENV.fetch("FRONTEND_URL") { raise "FRONTEND_URL must be set in production" } : ENV.fetch("FRONTEND_URL", "http://localhost:3000")
-
-    resource "/api/v1/events/collect",
-      headers: [ "Content-Type", "X-Site-Id", "X-Api-Key" ],
-      methods: [ :post, :options ]
 
     resource "*",
       headers: :any,
