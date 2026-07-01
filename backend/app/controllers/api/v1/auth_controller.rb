@@ -71,7 +71,7 @@ module Api
         end
       end
 
-      # rubocop:disable Metrics/MethodLength
+      # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       def upsert_user_from_payload(payload)
         google_sub = payload['sub']
         display_name = payload['name'].presence || 'Google User'
@@ -81,16 +81,21 @@ module Api
             u.display_name = display_name
           end
         rescue ActiveRecord::RecordNotUnique
-          Rails.logger.warn 'Concurrent user creation race; retrying find'
+          Rails.logger.warn 'Concurrent user creation race (DB constraint); retrying find'
           User.find_by(google_sub: google_sub)
         end
 
-        return nil unless user&.persisted?
+        if user && !user.persisted?
+          Rails.logger.warn "Concurrent user creation race (validation): #{user.errors.full_messages.join(', ')}"
+          user = User.find_by(google_sub: google_sub)
+        end
+
+        return nil unless user
 
         user.update(display_name: display_name) if user.display_name != display_name
         user
       end
-      # rubocop:enable Metrics/MethodLength
+      # rubocop:enable Metrics/MethodLength, Metrics/AbcSize
 
       def render_auth_success(user)
         token = encode_jwt_token(user.google_sub)
