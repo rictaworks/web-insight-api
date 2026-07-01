@@ -8,6 +8,7 @@ gem 'rails', '~> 7.1.6'
 gem 'puma', '>= 5.0'
 
 # JWT gem for token-based authentication
+gem 'google-id-token', '~> 1.4'
 gem 'jwt', '~> 2.8'
 
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem

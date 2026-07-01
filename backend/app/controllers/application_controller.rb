@@ -62,6 +62,7 @@ class ApplicationController < ActionController::API
     User.find_by(google_sub: sub)
   end
 
+  # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
   def mock_development_user
     unless ActiveRecord::Base.connection.table_exists?(:users)
       Rails.logger.warn 'users table not found, cannot create dev mock user'
@@ -80,14 +81,15 @@ class ApplicationController < ActionController::API
       User.find_by(google_sub: sub)
     end
 
-    return nil if user.nil?
-
-    unless user.persisted?
-      Rails.logger.warn "Dev mock user invalid: #{user.errors.full_messages.join(', ')}"
-      return nil
+    if user && !user.persisted?
+      Rails.logger.warn "Concurrent dev user creation race (validation): #{user.errors.full_messages.join(', ')}"
+      user = User.find_by(google_sub: sub)
     end
+
+    return nil unless user
 
     user.update(display_name: name) if user.display_name != name
     user
   end
+  # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
 end
