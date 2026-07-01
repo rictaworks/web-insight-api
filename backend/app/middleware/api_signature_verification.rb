@@ -1,11 +1,27 @@
 class ApiSignatureVerification
   EVENTS_PATH_PATTERN = %r{\A/api/v1/events(/|\z)}
   MAX_BODY_BYTES = 32 * 1024
-  TIMESTAMP_TOLERANCE_SECONDS = ENV.fetch('API_TIMESTAMP_TOLERANCE_SECONDS', 300).to_i
+  DEFAULT_TIMESTAMP_TOLERANCE_SECONDS = 300
 
   SITE_ID_HEADER = 'X-Site-Id'.freeze
   API_KEY_HEADER = 'X-Api-Key'.freeze
   TIMESTAMP_HEADER = 'X-Timestamp'.freeze
+
+  def self.timestamp_tolerance_seconds
+    raw = ENV.fetch('API_TIMESTAMP_TOLERANCE_SECONDS', nil)
+    return DEFAULT_TIMESTAMP_TOLERANCE_SECONDS if raw.blank?
+
+    parsed = Integer(raw, 10, exception: false)
+    return parsed if parsed&.positive?
+
+    raise "API_TIMESTAMP_TOLERANCE_SECONDS is invalid: #{raw.inspect}" if Rails.env.production?
+
+    Rails.logger.warn(
+      "API_TIMESTAMP_TOLERANCE_SECONDS is invalid (#{raw.inspect}); " \
+      "using default #{DEFAULT_TIMESTAMP_TOLERANCE_SECONDS}"
+    )
+    DEFAULT_TIMESTAMP_TOLERANCE_SECONDS
+  end
 
   def initialize(app)
     @app = app
@@ -44,21 +60,23 @@ class ApiSignatureVerification
     @app.call(env)
   end
 
-  def header_error(site_id, api_key_sig, timestamp)
-    return 'missing X-Site-Id, X-Api-Key or X-Timestamp header' if [site_id, api_key_sig, timestamp].any?(&:blank?)
-
-    "timestamp out of tolerance (site_id=#{site_id})" unless fresh_timestamp?(timestamp)
-  end
-
   def request_credentials(request)
     [request.headers[SITE_ID_HEADER], request.headers[API_KEY_HEADER], request.headers[TIMESTAMP_HEADER]]
   end
 
-  def fresh_timestamp?(timestamp)
-    parsed = Integer(timestamp, exception: false)
-    return false unless parsed
+  def header_error(site_id, api_key_sig, timestamp)
+    if [site_id, api_key_sig, timestamp].any?(&:blank?)
+      return "missing #{SITE_ID_HEADER}, #{API_KEY_HEADER} or #{TIMESTAMP_HEADER} header"
+    end
 
-    (Time.now.to_i - parsed).abs <= TIMESTAMP_TOLERANCE_SECONDS
+    parsed_timestamp = Integer(timestamp, 10, exception: false)
+    return "invalid #{TIMESTAMP_HEADER} format (site_id=#{site_id})" unless parsed_timestamp
+
+    "timestamp out of tolerance (site_id=#{site_id})" unless fresh_timestamp?(parsed_timestamp)
+  end
+
+  def fresh_timestamp?(parsed_timestamp)
+    (Time.now.to_i - parsed_timestamp).abs <= self.class.timestamp_tolerance_seconds
   end
 
   def valid_signature?(timestamp, body, api_key, provided_sig)
@@ -77,16 +95,12 @@ class ApiSignatureVerification
   end
 
   def unauthorized_response(log_reason)
-    Rails.logger.warn("ApiSignatureVerification: #{sanitize_for_log(log_reason)}")
+    Rails.logger.warn("ApiSignatureVerification: #{LogSanitizer.strip_control_characters(log_reason)}")
 
     [
       401,
       { 'Content-Type' => 'application/json', 'Date' => Time.now.httpdate },
       [{ error: 'Unauthorized' }.to_json]
     ]
-  end
-
-  def sanitize_for_log(message)
-    message.gsub(/[[:cntrl:]]/, '')
   end
 end

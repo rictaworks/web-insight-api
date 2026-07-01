@@ -24,6 +24,14 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
     OpenSSL::HMAC.hexdigest('SHA256', api_key, "#{timestamp}.#{body}")
   end
 
+  def rack_header(header_name)
+    "HTTP_#{header_name.upcase.tr('-', '_')}"
+  end
+
+  let(:site_id_key) { rack_header(ApiSignatureVerification::SITE_ID_HEADER) }
+  let(:api_key_key) { rack_header(ApiSignatureVerification::API_KEY_HEADER) }
+  let(:timestamp_key) { rack_header(ApiSignatureVerification::TIMESTAMP_HEADER) }
+
   describe 'path matching' do
     it 'bypasses verification for non-events paths' do
       status, _, body = make_request('/api/v1/auth/google')
@@ -57,7 +65,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
     it 'returns a generic 401 if X-Site-Id is missing' do
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_API_KEY' => 'some_sig', 'HTTP_X_TIMESTAMP' => now.to_s },
+        { api_key_key => 'some_sig', timestamp_key => now.to_s },
         body_content
       )
       expect_unauthorized(status, body)
@@ -66,7 +74,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
     it 'returns a generic 401 if X-Api-Key is missing' do
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => site.id, 'HTTP_X_TIMESTAMP' => now.to_s },
+        { site_id_key => site.id, timestamp_key => now.to_s },
         body_content
       )
       expect_unauthorized(status, body)
@@ -76,7 +84,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
       correct_sig = sign(site.api_key, now, body_content)
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => site.id, 'HTTP_X_API_KEY' => correct_sig },
+        { site_id_key => site.id, api_key_key => correct_sig },
         body_content
       )
       expect_unauthorized(status, body)
@@ -85,29 +93,51 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
     it 'returns a generic 401 if X-Timestamp is not a valid integer' do
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => site.id, 'HTTP_X_API_KEY' => 'sig', 'HTTP_X_TIMESTAMP' => 'not-a-number' },
+        { site_id_key => site.id, api_key_key => 'sig', timestamp_key => 'not-a-number' },
         body_content
       )
       expect_unauthorized(status, body)
     end
 
+    it 'logs a distinct reason for a malformed timestamp vs a stale one' do
+      expect(Rails.logger).to receive(:warn).with(/invalid X-Timestamp format/)
+      make_request(
+        '/api/v1/events/collect',
+        { site_id_key => site.id, api_key_key => 'sig', timestamp_key => 'not-a-number' },
+        body_content
+      )
+    end
+
+    it 'treats a zero-padded timestamp as decimal, not octal' do
+      zero_padded = format('%011d', now)
+      correct_sig = sign(site.api_key, zero_padded, body_content)
+
+      status, _, body = make_request(
+        '/api/v1/events/collect',
+        { site_id_key => site.id, api_key_key => correct_sig, timestamp_key => zero_padded },
+        body_content
+      )
+      expect(status).to eq(200)
+      expect(body).to eq(['OK'])
+    end
+
     it 'returns a generic 401 if X-Timestamp is older than the allowed tolerance' do
-      old_timestamp = now - (ApiSignatureVerification::TIMESTAMP_TOLERANCE_SECONDS + 1)
+      old_timestamp = now - (ApiSignatureVerification.timestamp_tolerance_seconds + 1)
       correct_sig = sign(site.api_key, old_timestamp, body_content)
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => site.id, 'HTTP_X_API_KEY' => correct_sig, 'HTTP_X_TIMESTAMP' => old_timestamp.to_s },
+        { site_id_key => site.id, api_key_key => correct_sig, timestamp_key => old_timestamp.to_s },
         body_content
       )
       expect_unauthorized(status, body)
     end
 
     it 'returns a generic 401 if X-Timestamp is further in the future than the allowed tolerance' do
-      future_timestamp = now + (ApiSignatureVerification::TIMESTAMP_TOLERANCE_SECONDS + 1)
+      future_timestamp = now + (ApiSignatureVerification.timestamp_tolerance_seconds + 1)
       correct_sig = sign(site.api_key, future_timestamp, body_content)
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => site.id, 'HTTP_X_API_KEY' => correct_sig, 'HTTP_X_TIMESTAMP' => future_timestamp.to_s },
+        { site_id_key => site.id, api_key_key => correct_sig, timestamp_key => future_timestamp.to_s },
         body_content
       )
       expect_unauthorized(status, body)
@@ -117,7 +147,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
       other_uuid = SecureRandom.uuid
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => other_uuid, 'HTTP_X_API_KEY' => 'sig', 'HTTP_X_TIMESTAMP' => now.to_s },
+        { site_id_key => other_uuid, api_key_key => 'sig', timestamp_key => now.to_s },
         body_content
       )
       expect_unauthorized(status, body)
@@ -126,7 +156,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
     it 'returns a generic 401 if signature does not match' do
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => site.id, 'HTTP_X_API_KEY' => 'wrong_sig', 'HTTP_X_TIMESTAMP' => now.to_s },
+        { site_id_key => site.id, api_key_key => 'wrong_sig', timestamp_key => now.to_s },
         body_content
       )
       expect_unauthorized(status, body)
@@ -136,7 +166,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
       stale_scheme_sig = OpenSSL::HMAC.hexdigest('SHA256', site.api_key, body_content)
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => site.id, 'HTTP_X_API_KEY' => stale_scheme_sig, 'HTTP_X_TIMESTAMP' => now.to_s },
+        { site_id_key => site.id, api_key_key => stale_scheme_sig, timestamp_key => now.to_s },
         body_content
       )
       expect_unauthorized(status, body)
@@ -148,7 +178,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
 
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => site.id, 'HTTP_X_API_KEY' => sig, 'HTTP_X_TIMESTAMP' => now.to_s },
+        { site_id_key => site.id, api_key_key => sig, timestamp_key => now.to_s },
         oversized_body
       )
       expect_unauthorized(status, body)
@@ -159,7 +189,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
 
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => site.id, 'HTTP_X_API_KEY' => correct_sig, 'HTTP_X_TIMESTAMP' => now.to_s },
+        { site_id_key => site.id, api_key_key => correct_sig, timestamp_key => now.to_s },
         body_content
       )
       expect(status).to eq(200)
@@ -167,16 +197,53 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
     end
 
     it 'returns 200 for a timestamp within the allowed tolerance boundary' do
-      boundary_timestamp = now - ApiSignatureVerification::TIMESTAMP_TOLERANCE_SECONDS
+      boundary_timestamp = now - ApiSignatureVerification.timestamp_tolerance_seconds
       correct_sig = sign(site.api_key, boundary_timestamp, body_content)
 
       status, _, body = make_request(
         '/api/v1/events/collect',
-        { 'HTTP_X_SITE_ID' => site.id, 'HTTP_X_API_KEY' => correct_sig, 'HTTP_X_TIMESTAMP' => boundary_timestamp.to_s },
+        { site_id_key => site.id, api_key_key => correct_sig, timestamp_key => boundary_timestamp.to_s },
         body_content
       )
       expect(status).to eq(200)
       expect(body).to eq(['OK'])
+    end
+  end
+
+  describe '.timestamp_tolerance_seconds' do
+    around do |example|
+      original = ENV.fetch('API_TIMESTAMP_TOLERANCE_SECONDS', nil)
+      example.run
+      if original.nil?
+        ENV.delete('API_TIMESTAMP_TOLERANCE_SECONDS')
+      else
+        ENV['API_TIMESTAMP_TOLERANCE_SECONDS'] = original
+      end
+    end
+
+    it 'defaults to 300 when the env var is unset' do
+      ENV.delete('API_TIMESTAMP_TOLERANCE_SECONDS')
+      expect(described_class.timestamp_tolerance_seconds).to eq(300)
+    end
+
+    it 'uses the env var value when it is a valid positive integer' do
+      ENV['API_TIMESTAMP_TOLERANCE_SECONDS'] = '120'
+      expect(described_class.timestamp_tolerance_seconds).to eq(120)
+    end
+
+    it 'falls back to the default and warns when the env var is malformed outside production' do
+      ENV['API_TIMESTAMP_TOLERANCE_SECONDS'] = 'not-a-number'
+      allow(Rails.env).to receive(:production?).and_return(false)
+      expect(Rails.logger).to receive(:warn).with(/API_TIMESTAMP_TOLERANCE_SECONDS is invalid/)
+      expect(described_class.timestamp_tolerance_seconds).to eq(300)
+    end
+
+    it 'raises when the env var is malformed in production' do
+      ENV['API_TIMESTAMP_TOLERANCE_SECONDS'] = '0'
+      allow(Rails.env).to receive(:production?).and_return(true)
+      expect do
+        described_class.timestamp_tolerance_seconds
+      end.to raise_error(/API_TIMESTAMP_TOLERANCE_SECONDS is invalid/)
     end
   end
 end
