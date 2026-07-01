@@ -1,5 +1,6 @@
 class ApiSignatureVerification
-  UUID_REGEX = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+  EVENTS_PATH_PATTERN = %r{\A/api/v1/events(/|\z)}
+  MAX_BODY_BYTES = 32 * 1024
 
   def initialize(app)
     @app = app
@@ -18,50 +19,48 @@ class ApiSignatureVerification
   private
 
   def should_verify?(request)
-    request.path.start_with?('/api/v1/events/') && request.request_method != 'OPTIONS'
+    request.path.match?(EVENTS_PATH_PATTERN) && request.request_method != 'OPTIONS'
   end
 
   def verify_signature(request, env)
     site_id = request.headers['X-Site-Id']
     api_key_sig = request.headers['X-Api-Key']
-    error = find_validation_error(site_id, api_key_sig)
-    return unauthorized_response(error) if error
+
+    return unauthorized_response('missing X-Site-Id or X-Api-Key header') if site_id.blank? || api_key_sig.blank?
+
+    body, oversized = read_body(request)
+    return unauthorized_response("request body exceeds #{MAX_BODY_BYTES} bytes (site_id=#{site_id})") if oversized
 
     site = Site.find_by(id: site_id)
-    return unauthorized_response('Site not found') unless site
-    return unauthorized_response('Invalid API Key signature') unless valid_signature?(request, site.api_key,
-                                                                                      api_key_sig)
+    unless site && valid_signature?(body, site.api_key, api_key_sig)
+      return unauthorized_response("signature verification failed (site_id=#{site_id})")
+    end
 
     @app.call(env)
   end
 
-  def find_validation_error(site_id, api_key_sig)
-    if site_id.blank? || api_key_sig.blank?
-      'Missing X-Site-Id or X-Api-Key'
-    elsif !site_id.match?(UUID_REGEX)
-      'Invalid Site ID format'
-    end
-  end
-
-  def valid_signature?(request, api_key, provided_sig)
-    body = read_body(request)
+  def valid_signature?(body, api_key, provided_sig)
     expected_sig = OpenSSL::HMAC.hexdigest('SHA256', api_key, body)
     ActiveSupport::SecurityUtils.secure_compare(expected_sig, provided_sig)
   end
 
   def read_body(request)
-    return '' unless request.body
+    return ['', false] unless request.body
 
-    body = request.body.read
+    body = request.body.read(MAX_BODY_BYTES + 1)
     request.body.rewind
-    body
+    body ||= ''
+
+    [body, body.bytesize > MAX_BODY_BYTES]
   end
 
-  def unauthorized_response(message)
+  def unauthorized_response(log_reason)
+    Rails.logger.warn("ApiSignatureVerification: #{log_reason}")
+
     [
       401,
       { 'Content-Type' => 'application/json' },
-      [{ error: "Unauthorized: #{message}" }.to_json]
+      [{ error: 'Unauthorized' }.to_json]
     ]
   end
 end
