@@ -29,6 +29,11 @@ module Backend
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
 
+    # Rate limiting must run before signature verification so that requests
+    # with invalid/missing credentials are still throttled instead of always
+    # short-circuiting with 401 before Rack::Attack sees them.
+    config.middleware.use Rack::Attack
+
     # Register API key signature verification middleware
     require_relative "../app/middleware/api_signature_verification"
     config.middleware.use ApiSignatureVerification

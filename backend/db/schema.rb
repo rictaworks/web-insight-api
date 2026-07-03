@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_06_30_000002) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_01_215722) do
   create_table "age_groups", force: :cascade do |t|
     t.string "name", null: false
     t.datetime "created_at", null: false
@@ -132,7 +132,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_30_000002) do
     t.datetime "started_at"
     t.datetime "last_seen_at"
     t.datetime "created_at", null: false
-    t.index ["site_id"], name: "index_sessions_on_site_id"
+    t.index ["site_id", "fingerprint", "last_seen_at"], name: "index_sessions_on_site_fingerprint_last_seen"
   end
 
   create_table "sites", id: :string, force: :cascade do |t|
