@@ -20,6 +20,11 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
     expect(JSON.parse(body.first)['error']).to eq('Unauthorized')
   end
 
+  def expect_payload_too_large(status, body)
+    expect(status).to eq(413)
+    expect(JSON.parse(body.first)['error']).to eq('Payload Too Large')
+  end
+
   def sign(api_key, timestamp, body)
     OpenSSL::HMAC.hexdigest('SHA256', api_key, "#{timestamp}.#{body}")
   end
@@ -172,7 +177,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
       expect_unauthorized(status, body)
     end
 
-    it 'returns a generic 401 if the request body exceeds the 32KB limit' do
+    it 'returns a 413 Payload Too Large if the request body exceeds the 32KB limit' do
       oversized_body = { event_type: 'pageview', page_url: '/', padding: 'a' * 33_000 }.to_json
       sig = sign(site.api_key, now, oversized_body)
 
@@ -181,7 +186,7 @@ RSpec.describe ApiSignatureVerification, type: :middleware do
         { site_id_key => site.id, api_key_key => sig, timestamp_key => now.to_s },
         oversized_body
       )
-      expect_unauthorized(status, body)
+      expect_payload_too_large(status, body)
     end
 
     it 'returns 200 and passes request if signature and timestamp are valid' do

@@ -8,6 +8,7 @@ Rails.application.routes.draw do
   namespace :api do
     namespace :v1 do
       post 'auth/google', to: 'auth#google'
+      post 'events/collect', to: 'events#collect'
     end
   end
 

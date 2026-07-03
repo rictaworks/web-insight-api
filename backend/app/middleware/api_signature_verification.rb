@@ -23,6 +23,18 @@ class ApiSignatureVerification
     DEFAULT_TIMESTAMP_TOLERANCE_SECONDS
   end
 
+  # Shared with Rack::Attack so it can decide, before this middleware runs,
+  # whether a request is genuinely authenticated (see config/initializers/rack_attack.rb).
+  def self.valid_signature?(timestamp:, body:, api_key:, provided_sig:)
+    expected_sig = OpenSSL::HMAC.hexdigest('SHA256', api_key, "#{timestamp}.#{body}")
+    ActiveSupport::SecurityUtils.secure_compare(expected_sig, provided_sig)
+  end
+
+  def self.fresh_timestamp?(timestamp)
+    parsed_timestamp = Integer(timestamp, 10, exception: false)
+    parsed_timestamp && (Time.now.to_i - parsed_timestamp).abs <= timestamp_tolerance_seconds
+  end
+
   def initialize(app)
     @app = app
   end
@@ -50,14 +62,20 @@ class ApiSignatureVerification
     return unauthorized_response(error) if error
 
     body, oversized = read_body(request)
-    return unauthorized_response("request body exceeds #{MAX_BODY_BYTES} bytes (site_id=#{site_id})") if oversized
+    return payload_too_large_response("request body exceeds #{MAX_BODY_BYTES} bytes (site_id=#{site_id})") if oversized
 
-    site = Site.find_by(id: site_id)
-    unless site && valid_signature?(timestamp, body, site.api_key, api_key_sig)
+    unless signed_by_site?(site_id, timestamp, body, api_key_sig)
       return unauthorized_response("signature verification failed (site_id=#{site_id})")
     end
 
     @app.call(env)
+  end
+
+  def signed_by_site?(site_id, timestamp, body, api_key_sig)
+    site = Site.find_by(id: site_id)
+    site && self.class.valid_signature?(
+      timestamp: timestamp, body: body, api_key: site.api_key, provided_sig: api_key_sig
+    )
   end
 
   def request_credentials(request)
@@ -69,19 +87,9 @@ class ApiSignatureVerification
       return "missing #{SITE_ID_HEADER}, #{API_KEY_HEADER} or #{TIMESTAMP_HEADER} header"
     end
 
-    parsed_timestamp = Integer(timestamp, 10, exception: false)
-    return "invalid #{TIMESTAMP_HEADER} format (site_id=#{site_id})" unless parsed_timestamp
+    return "invalid #{TIMESTAMP_HEADER} format (site_id=#{site_id})" unless Integer(timestamp, 10, exception: false)
 
-    "timestamp out of tolerance (site_id=#{site_id})" unless fresh_timestamp?(parsed_timestamp)
-  end
-
-  def fresh_timestamp?(parsed_timestamp)
-    (Time.now.to_i - parsed_timestamp).abs <= self.class.timestamp_tolerance_seconds
-  end
-
-  def valid_signature?(timestamp, body, api_key, provided_sig)
-    expected_sig = OpenSSL::HMAC.hexdigest('SHA256', api_key, "#{timestamp}.#{body}")
-    ActiveSupport::SecurityUtils.secure_compare(expected_sig, provided_sig)
+    "timestamp out of tolerance (site_id=#{site_id})" unless self.class.fresh_timestamp?(timestamp)
   end
 
   def read_body(request)
@@ -101,6 +109,16 @@ class ApiSignatureVerification
       401,
       { 'Content-Type' => 'application/json', 'Date' => Time.now.httpdate },
       [{ error: 'Unauthorized' }.to_json]
+    ]
+  end
+
+  def payload_too_large_response(log_reason)
+    Rails.logger.warn("ApiSignatureVerification: #{LogSanitizer.strip_control_characters(log_reason)}")
+
+    [
+      413,
+      { 'Content-Type' => 'application/json' },
+      [{ error: 'Payload Too Large' }.to_json]
     ]
   end
 end
