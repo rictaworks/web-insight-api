@@ -45,7 +45,7 @@ class EventCollector
     )
 
     # 6. Create the event
-    Event.create!(
+    event = Event.create!(
       site_id: site_id,
       session_id: session.id,
       event_type: payload['event_type'],
@@ -58,6 +58,12 @@ class EventCollector
       is_bot: is_bot,
       occurred_at: parse_occurred_at(payload['occurred_at'])
     )
+
+    # 7. Update site to verified if it is not already
+    site = Site.find_by(id: site_id)
+    site.update!(verified: true) if site && !site.verified?
+
+    event
   end
 
   def self.parse_occurred_at(value)

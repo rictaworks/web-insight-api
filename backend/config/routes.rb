@@ -9,6 +9,12 @@ Rails.application.routes.draw do
     namespace :v1 do
       post 'auth/google', to: 'auth#google'
       post 'events/collect', to: 'events#collect'
+
+      resources :sites, only: %i[index create show] do
+        member do
+          get :snippet
+        end
+      end
     end
   end
 

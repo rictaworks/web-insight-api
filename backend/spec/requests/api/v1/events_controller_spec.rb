@@ -72,6 +72,13 @@ RSpec.describe 'Events Collect API', type: :request do
         expect(session_id1).to eq(session_id2)
         expect(Session.count).to eq(1)
       end
+
+      it 'automatically verifies the site if it was unverified' do
+        expect(site.verified).to be false
+        post '/api/v1/events/collect', params: valid_payload, headers: auth_headers(valid_payload)
+        expect(response).to have_http_status(:ok)
+        expect(site.reload.verified).to be true
+      end
     end
 
     context 'when validation fails' do
