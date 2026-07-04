@@ -1,0 +1,78 @@
+module Api
+  module V1
+    class SitesController < ApplicationController
+      before_action :set_site, only: %i[show snippet]
+
+      # GET /api/v1/sites
+      def index
+        @sites = current_user.sites.order(created_at: :asc).limit(10)
+        render json: @sites, status: :ok
+      end
+
+      # GET /api/v1/sites/:id
+      def show
+        render json: @site, status: :ok
+      end
+
+      # POST /api/v1/sites
+      def create
+        @site = current_user.sites.build(site_params)
+
+        if create_within_limit?
+          render_create_result
+        else
+          render json: { error: 'Maximum site limit reached (10 sites)' }, status: :unprocessable_content
+        end
+      end
+
+      # GET /api/v1/sites/:id/snippet
+      def snippet
+        render json: { snippet: @site.generate_snippet }, status: :ok
+      end
+
+      private
+
+      # Serialize concurrent creates for this user so the 10-site cap cannot be
+      # bypassed by requests that each observe count < LIMIT before either insert
+      # commits. The user-row lock (SELECT ... FOR UPDATE on PostgreSQL) makes the
+      # check-and-insert atomic; SQLite dev/test run the block serially. Returns
+      # false only when the limit is reached, so @site.save runs inside the lock.
+      def create_within_limit?
+        within_limit = true
+        current_user.with_lock do
+          if SitePolicy.new(current_user).create?
+            @site.save
+          else
+            within_limit = false
+          end
+        end
+        within_limit
+      end
+
+      def render_create_result
+        if @site.persisted?
+          render json: @site, status: :created
+        else
+          render json: { errors: @site.errors.full_messages }, status: :unprocessable_content
+        end
+      end
+
+      def set_site
+        site_exists = Site.exists?(id: params[:id])
+        @site = current_user.sites.find_by(id: params[:id])
+
+        return if @site
+
+        if site_exists
+          render json: { error: 'Forbidden' }, status: :forbidden
+        else
+          render json: { error: 'Not Found' }, status: :not_found
+        end
+      end
+
+      def site_params
+        params.require(:site).permit(:name, :url)
+      end
+    end
+  end
+end
