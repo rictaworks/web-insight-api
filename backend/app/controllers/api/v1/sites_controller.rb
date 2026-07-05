@@ -1,7 +1,7 @@
 module Api
   module V1
     class SitesController < ApplicationController
-      before_action :set_site, only: %i[show snippet]
+      before_action :set_site, only: %i[show snippet pageviews]
 
       # GET /api/v1/sites
       def index
@@ -29,6 +29,34 @@ module Api
       def snippet
         render json: { snippet: @site.generate_snippet }, status: :ok
       end
+
+      # GET /api/v1/sites/:id/pageviews
+      # rubocop:disable Metrics/MethodLength
+      def pageviews
+        period = params[:period]
+        axis = params[:axis]
+
+        allowed_periods = %w[7d 30d 90d]
+        allowed_axes = %w[day week month]
+
+        if period.blank? || allowed_periods.exclude?(period)
+          render json: {
+            error: "Invalid or missing period. Allowed values: #{allowed_periods.join(', ')}"
+          }, status: :unprocessable_content
+          return
+        end
+
+        if axis.blank? || allowed_axes.exclude?(axis)
+          render json: {
+            error: "Invalid or missing axis. Allowed values: #{allowed_axes.join(', ')}"
+          }, status: :unprocessable_content
+          return
+        end
+
+        result = AnalyticsEngine.pageviews(@site, period: period, axis: axis)
+        render json: result, status: :ok
+      end
+      # rubocop:enable Metrics/MethodLength
 
       private
 
