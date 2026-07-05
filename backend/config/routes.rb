@@ -13,6 +13,7 @@ Rails.application.routes.draw do
       resources :sites, only: %i[index create show] do
         member do
           get :snippet
+          get :pageviews
         end
       end
     end

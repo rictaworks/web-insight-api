@@ -178,4 +178,62 @@ RSpec.describe 'Api::V1::SitesController', type: :request do
       end
     end
   end
+
+  describe 'GET /api/v1/sites/:id/pageviews' do
+    let!(:my_site) { Site.create!(name: 'My Site', url: 'https://my.com', user: user) }
+    let!(:other_site) { Site.create!(name: 'Other Site', url: 'https://other.com', user: other_user) }
+
+    context 'when unauthenticated' do
+      it 'returns 401' do
+        get "/api/v1/sites/#{my_site.id}/pageviews?period=7d&axis=day", headers: unauth_headers
+        expect(response).to have_http_status(:unauthorized)
+      end
+    end
+
+    context 'when authenticated' do
+      it 'returns 403 forbidden if site belongs to other user' do
+        get "/api/v1/sites/#{other_site.id}/pageviews?period=7d&axis=day", headers: auth_headers
+        expect(response).to have_http_status(:forbidden)
+      end
+
+      it 'returns 404 not found if site does not exist' do
+        get '/api/v1/sites/non_existent_uuid/pageviews?period=7d&axis=day', headers: auth_headers
+        expect(response).to have_http_status(:not_found)
+      end
+
+      it 'returns 422 if period is missing or invalid' do
+        get "/api/v1/sites/#{my_site.id}/pageviews?axis=day", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body['error']).to include('Invalid or missing period')
+
+        get "/api/v1/sites/#{my_site.id}/pageviews?period=invalid&axis=day", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_entity)
+      end
+
+      it 'returns 422 if axis is missing or invalid' do
+        get "/api/v1/sites/#{my_site.id}/pageviews?period=7d", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body['error']).to include('Invalid or missing axis')
+
+        get "/api/v1/sites/#{my_site.id}/pageviews?period=7d&axis=invalid", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_entity)
+      end
+
+      it 'returns 200 and pageviews data if site belongs to user and parameters are valid' do
+        # Create some test events
+        session = Session.create!(site: my_site, fingerprint: 'fp1', started_at: 1.day.ago)
+        Event.create!(site: my_site, session: session, event_type: 'pageview', occurred_at: 1.day.ago)
+
+        get "/api/v1/sites/#{my_site.id}/pageviews?period=7d&axis=day", headers: auth_headers
+
+        expect(response).to have_http_status(:ok)
+        res = response.parsed_body
+        expect(res['totals']).to be_present
+        expect(res['totals']['pv']).to eq(1)
+        expect(res['change_rates']).to be_present
+        expect(res['series']).to be_an(Array)
+        expect(res['series'].size).to eq(7)
+      end
+    end
+  end
 end
