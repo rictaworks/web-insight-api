@@ -66,7 +66,7 @@ module Api
 
         allowed_viewports = %w[desktop mobile]
 
-        if url.blank?
+        if url.blank? || !url.is_a?(String)
           render json: {
             error: 'Invalid or missing url. Parameter is required.'
           }, status: :unprocessable_content

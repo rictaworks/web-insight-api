@@ -265,6 +265,14 @@ RSpec.describe 'Api::V1::SitesController', type: :request do
         expect(response.parsed_body['error']).to include('Invalid or missing url')
       end
 
+      it 'returns 422 (not 500) if url is not a string (parameter pollution)' do
+        # ?url[]=https://my.com/ makes Rails pass an Array; it must be rejected,
+        # not propagated into URI.parse / string matching.
+        get "/api/v1/sites/#{my_site.id}/heatmap?url[]=https://my.com/&viewport=desktop", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body['error']).to include('Invalid or missing url')
+      end
+
       it 'returns 422 if viewport is missing or invalid' do
         get "/api/v1/sites/#{my_site.id}/heatmap?url=https://my.com/", headers: auth_headers
         expect(response).to have_http_status(:unprocessable_content)
