@@ -82,4 +82,60 @@ RSpec.describe AnalyticsEngine, type: :service do
       end
     end
   end
+
+  describe '.heatmap' do
+    let(:page_url) { 'https://mysite.com/home' }
+
+    it 'caches the result for 5 minutes' do
+      expect(Rails.cache).to receive(:fetch).with("heatmap_#{site.id}_#{page_url}_desktop",
+                                                  expires_in: 5.minutes).and_call_original
+      AnalyticsEngine.heatmap(site, url: page_url, viewport: 'desktop')
+    end
+
+    context 'with click events' do
+      let!(:desktop_session) { Session.create!(site: site, fingerprint: 'fp1', started_at: 1.day.ago) }
+      let!(:mobile_session) { Session.create!(site: site, fingerprint: 'fp2', started_at: 1.day.ago) }
+      let!(:bot_session) { Session.create!(site: site, fingerprint: 'fp3', is_bot: true, started_at: 1.day.ago) }
+
+      before do
+        desktop_ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        mobile_ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X)'
+
+        Event.create!(site: site, session: desktop_session, event_type: 'click', page_url: page_url, x_ratio: 0.1,
+                      y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 1.hour.ago, is_bot: false)
+        Event.create!(site: site, session: desktop_session, event_type: 'click', page_url: page_url, x_ratio: 0.1,
+                      y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 45.minutes.ago, is_bot: false)
+        Event.create!(site: site, session: desktop_session, event_type: 'click', page_url: page_url, x_ratio: 0.95,
+                      y_ratio: 0.99, user_agent: desktop_ua, occurred_at: 30.minutes.ago, is_bot: false)
+        Event.create!(site: site, session: desktop_session, event_type: 'click', page_url: 'https://mysite.com/other',
+                      x_ratio: 0.1, y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 15.minutes.ago, is_bot: false)
+        Event.create!(site: site, session: mobile_session, event_type: 'click', page_url: page_url, x_ratio: 0.1,
+                      y_ratio: 0.2, user_agent: mobile_ua, occurred_at: 10.minutes.ago, is_bot: false)
+        Event.create!(site: site, session: bot_session, event_type: 'click', page_url: page_url, x_ratio: 0.1,
+                      y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 5.minutes.ago, is_bot: true)
+        Event.create!(site: site, session: desktop_session, event_type: 'click', page_url: page_url, x_ratio: 0.1,
+                      y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 5.minutes.ago, is_bot: true)
+      end
+
+      it 'calculates desktop heatmap grid correctly' do
+        result = AnalyticsEngine.heatmap(site, url: page_url, viewport: 'desktop')
+
+        expect(result[:max_count]).to eq(2)
+        expect(result[:grid].size).to eq(20)
+        expect(result[:grid][0].size).to eq(20)
+
+        expect(result[:grid][4][2]).to eq(2)
+        expect(result[:grid][19][19]).to eq(1)
+        expect(result[:grid][0][0]).to eq(0)
+      end
+
+      it 'calculates mobile heatmap grid correctly' do
+        result = AnalyticsEngine.heatmap(site, url: page_url, viewport: 'mobile')
+
+        expect(result[:max_count]).to eq(1)
+        expect(result[:grid][4][2]).to eq(1)
+        expect(result[:grid][19][19]).to eq(0)
+      end
+    end
+  end
 end

@@ -10,6 +10,20 @@ class AnalyticsEngine
     end
   end
 
+  def self.heatmap(site, url:, viewport:)
+    cache_key = "heatmap_#{site.id}_#{url}_#{viewport}"
+
+    Rails.cache.fetch(cache_key, expires_in: CACHE_TTL) do
+      new(site, period: nil, axis: nil).calculate_heatmap(url: url, viewport: viewport)
+    end
+  end
+
+  def self.mobile_user_agent?(user_agent)
+    return false if user_agent.blank?
+
+    user_agent.match?(/Mobi|Android|iPhone|iPad|Windows Phone/i)
+  end
+
   def initialize(site, period:, axis:)
     @site = site
     @period = period
@@ -94,6 +108,42 @@ class AnalyticsEngine
       },
       change_rates: change_rates,
       series: series
+    }
+  end
+
+  def calculate_heatmap(url:, viewport:)
+    clicks = @site.events
+                  .joins(:session)
+                  .where(events: { event_type: 'click', page_url: url, is_bot: false })
+                  .where(sessions: { is_bot: false })
+                  .select('events.x_ratio, events.y_ratio, events.user_agent')
+                  .to_a
+
+    filtered_clicks = clicks.select do |c|
+      is_mobile = self.class.mobile_user_agent?(c.user_agent)
+      viewport == 'mobile' ? is_mobile : !is_mobile
+    end
+
+    grid_size = 20
+    grid = Array.new(grid_size) { Array.new(grid_size, 0) }
+    max_count = 0
+
+    filtered_clicks.each do |c|
+      next if c.x_ratio.nil? || c.y_ratio.nil?
+
+      col = (c.x_ratio.to_f * grid_size).floor
+      row = (c.y_ratio.to_f * grid_size).floor
+
+      col = col.clamp(0, grid_size - 1)
+      row = row.clamp(0, grid_size - 1)
+
+      grid[row][col] += 1
+      max_count = grid[row][col] if grid[row][col] > max_count
+    end
+
+    {
+      grid: grid,
+      max_count: max_count
     }
   end
 

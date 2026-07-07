@@ -236,4 +236,53 @@ RSpec.describe 'Api::V1::SitesController', type: :request do
       end
     end
   end
+
+  describe 'GET /api/v1/sites/:id/heatmap' do
+    let!(:my_site) { Site.create!(name: 'My Site', url: 'https://my.com', user: user) }
+    let!(:other_site) { Site.create!(name: 'Other Site', url: 'https://other.com', user: other_user) }
+
+    context 'when unauthenticated' do
+      it 'returns 401 unauthorized' do
+        get "/api/v1/sites/#{my_site.id}/heatmap?url=https://my.com/&viewport=desktop", headers: unauth_headers
+        expect(response).to have_http_status(:unauthorized)
+      end
+    end
+
+    context 'when authenticated' do
+      it 'returns 403 forbidden if site does not belong to user' do
+        get "/api/v1/sites/#{other_site.id}/heatmap?url=https://other.com/&viewport=desktop", headers: auth_headers
+        expect(response).to have_http_status(:forbidden)
+      end
+
+      it 'returns 404 not found if site does not exist' do
+        get '/api/v1/sites/non_existent_uuid/heatmap?url=https://my.com/&viewport=desktop', headers: auth_headers
+        expect(response).to have_http_status(:not_found)
+      end
+
+      it 'returns 422 if url is missing' do
+        get "/api/v1/sites/#{my_site.id}/heatmap?viewport=desktop", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body['error']).to include('Invalid or missing url')
+      end
+
+      it 'returns 422 if viewport is missing or invalid' do
+        get "/api/v1/sites/#{my_site.id}/heatmap?url=https://my.com/", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body['error']).to include('Invalid or missing viewport')
+
+        get "/api/v1/sites/#{my_site.id}/heatmap?url=https://my.com/&viewport=invalid", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_content)
+      end
+
+      it 'returns 200 and heatmap data if parameters are valid' do
+        get "/api/v1/sites/#{my_site.id}/heatmap?url=https://my.com/&viewport=desktop", headers: auth_headers
+
+        expect(response).to have_http_status(:ok)
+        res = response.parsed_body
+        expect(res['grid']).to be_an(Array)
+        expect(res['grid'].size).to eq(20)
+        expect(res['max_count']).to eq(0)
+      end
+    end
+  end
 end
