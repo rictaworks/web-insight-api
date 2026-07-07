@@ -82,4 +82,148 @@ RSpec.describe AnalyticsEngine, type: :service do
       end
     end
   end
+
+  describe '.heatmap' do
+    let(:page_url) { 'https://mysite.com/home' }
+
+    it 'caches the result for 5 minutes' do
+      expect(Rails.cache).to receive(:fetch).with("heatmap_#{site.id}_#{page_url}_desktop",
+                                                  expires_in: 5.minutes).and_call_original
+      AnalyticsEngine.heatmap(site, url: page_url, viewport: 'desktop')
+    end
+
+    context 'with click events' do
+      let!(:desktop_session) { Session.create!(site: site, fingerprint: 'fp1', started_at: 1.day.ago) }
+      let!(:mobile_session) { Session.create!(site: site, fingerprint: 'fp2', started_at: 1.day.ago) }
+      let!(:bot_session) { Session.create!(site: site, fingerprint: 'fp3', is_bot: true, started_at: 1.day.ago) }
+
+      before do
+        desktop_ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        mobile_ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X)'
+
+        Event.create!(site: site, session: desktop_session, event_type: 'click', page_url: page_url, x_ratio: 0.1,
+                      y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 1.hour.ago, is_bot: false)
+        Event.create!(site: site, session: desktop_session, event_type: 'click', page_url: page_url, x_ratio: 0.1,
+                      y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 45.minutes.ago, is_bot: false)
+        Event.create!(site: site, session: desktop_session, event_type: 'click', page_url: page_url, x_ratio: 0.95,
+                      y_ratio: 0.99, user_agent: desktop_ua, occurred_at: 30.minutes.ago, is_bot: false)
+        Event.create!(site: site, session: desktop_session, event_type: 'click', page_url: 'https://mysite.com/other',
+                      x_ratio: 0.1, y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 15.minutes.ago, is_bot: false)
+        Event.create!(site: site, session: mobile_session, event_type: 'click', page_url: page_url, x_ratio: 0.1,
+                      y_ratio: 0.2, user_agent: mobile_ua, occurred_at: 10.minutes.ago, is_bot: false)
+        Event.create!(site: site, session: bot_session, event_type: 'click', page_url: page_url, x_ratio: 0.1,
+                      y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 5.minutes.ago, is_bot: true)
+        Event.create!(site: site, session: desktop_session, event_type: 'click', page_url: page_url, x_ratio: 0.1,
+                      y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 5.minutes.ago, is_bot: true)
+      end
+
+      it 'calculates desktop heatmap grid correctly' do
+        result = AnalyticsEngine.heatmap(site, url: page_url, viewport: 'desktop')
+
+        expect(result[:max_count]).to eq(2)
+        expect(result[:grid].size).to eq(20)
+        expect(result[:grid][0].size).to eq(20)
+
+        expect(result[:grid][4][2]).to eq(2)
+        expect(result[:grid][19][19]).to eq(1)
+        expect(result[:grid][0][0]).to eq(0)
+      end
+
+      it 'calculates mobile heatmap grid correctly' do
+        result = AnalyticsEngine.heatmap(site, url: page_url, viewport: 'mobile')
+
+        expect(result[:max_count]).to eq(1)
+        expect(result[:grid][4][2]).to eq(1)
+        expect(result[:grid][19][19]).to eq(0)
+      end
+    end
+
+    context 'with query strings, fragments and trailing slashes on the same page' do
+      let(:canonical_url) { 'https://mysite.com/home' }
+      let!(:session) { Session.create!(site: site, fingerprint: 'fp1', started_at: 1.day.ago) }
+      let(:desktop_ua) { 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+
+      before do
+        # Same logical page reached via different spellings. All clicks land at
+        # the same coordinate and must aggregate into a single grid cell.
+        %w[
+          https://mysite.com/home
+          https://mysite.com/home?utm_source=ad
+          https://mysite.com/home#section
+          https://mysite.com/home/
+        ].each_with_index do |raw_url, i|
+          Event.create!(site: site, session: session, event_type: 'click', page_url: raw_url, x_ratio: 0.1,
+                        y_ratio: 0.2, user_agent: desktop_ua, occurred_at: (i + 1).minutes.ago, is_bot: false)
+        end
+      end
+
+      it 'aggregates clicks on the same page regardless of query/fragment/trailing slash' do
+        result = AnalyticsEngine.heatmap(site, url: canonical_url, viewport: 'desktop')
+
+        # All four spellings collapse to one page → one cell with count 4.
+        expect(result[:grid][4][2]).to eq(4)
+        expect(result[:max_count]).to eq(4)
+      end
+
+      it 'matches the canonical page even when called with a query string' do
+        result = AnalyticsEngine.heatmap(site, url: 'https://mysite.com/home?ref=twitter', viewport: 'desktop')
+
+        expect(result[:grid][4][2]).to eq(4)
+      end
+
+      it 'includes clicks whose raw href kept the explicit default port' do
+        # A href stored as https://mysite.com:443/home normalizes to the same
+        # portless key and must be counted, not filtered out by the SQL prefilter.
+        Event.create!(site: site, session: session, event_type: 'click', page_url: 'https://mysite.com:443/home',
+                      x_ratio: 0.1, y_ratio: 0.2, user_agent: desktop_ua, occurred_at: 30.seconds.ago, is_bot: false)
+
+        result = AnalyticsEngine.heatmap(site, url: canonical_url, viewport: 'desktop')
+
+        expect(result[:grid][4][2]).to eq(5) # 4 portless spellings + the :443 one
+      end
+
+      it 'does not leak clicks from a different page that shares the URL prefix' do
+        # "/homepage" shares the "/home" prefix; the SQL predicate must not match
+        # it, and the exact normalized comparison must exclude it either way.
+        Event.create!(site: site, session: session, event_type: 'click', page_url: 'https://mysite.com/homepage',
+                      x_ratio: 0.5, y_ratio: 0.5, user_agent: desktop_ua, occurred_at: 1.minute.ago, is_bot: false)
+
+        result = AnalyticsEngine.heatmap(site, url: canonical_url, viewport: 'desktop')
+
+        expect(result[:grid][4][2]).to eq(4) # only the /home clicks
+        expect(result[:grid][10][10]).to eq(0) # the /homepage click must not appear
+        expect(result[:max_count]).to eq(4)
+      end
+    end
+
+    context 'for the site root' do
+      let!(:session) { Session.create!(site: site, fingerprint: 'fp1', started_at: 1.day.ago) }
+      let(:desktop_ua) { 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+
+      before do
+        # Root spellings that all normalize to "https://mysite.com/", including
+        # the origin-only href with no path slash.
+        %w[
+          https://mysite.com/
+          https://mysite.com
+          https://mysite.com/?utm_source=ad
+          https://mysite.com/#top
+        ].each_with_index do |raw_url, i|
+          Event.create!(site: site, session: session, event_type: 'click', page_url: raw_url, x_ratio: 0.1,
+                        y_ratio: 0.2, user_agent: desktop_ua, occurred_at: (i + 1).minutes.ago, is_bot: false)
+        end
+        # A non-root page that must NOT be counted in the root heatmap.
+        Event.create!(site: site, session: session, event_type: 'click', page_url: 'https://mysite.com/about',
+                      x_ratio: 0.5, y_ratio: 0.5, user_agent: desktop_ua, occurred_at: 10.minutes.ago, is_bot: false)
+      end
+
+      it 'aggregates only root clicks (including the origin-only form) and excludes other pages' do
+        result = AnalyticsEngine.heatmap(site, url: 'https://mysite.com/', viewport: 'desktop')
+
+        expect(result[:grid][4][2]).to eq(4) # all four root spellings
+        expect(result[:grid][10][10]).to eq(0) # /about must not appear
+        expect(result[:max_count]).to eq(4)
+      end
+    end
+  end
 end

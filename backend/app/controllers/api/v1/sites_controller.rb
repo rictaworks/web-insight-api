@@ -1,7 +1,7 @@
 module Api
   module V1
     class SitesController < ApplicationController
-      before_action :set_site, only: %i[show snippet pageviews]
+      before_action :set_site, only: %i[show snippet pageviews heatmap]
 
       # GET /api/v1/sites
       def index
@@ -54,6 +54,33 @@ module Api
         end
 
         result = AnalyticsEngine.pageviews(@site, period: period, axis: axis)
+        render json: result, status: :ok
+      end
+      # rubocop:enable Metrics/MethodLength
+
+      # GET /api/v1/sites/:id/heatmap
+      # rubocop:disable Metrics/MethodLength
+      def heatmap
+        url = params[:url]
+        viewport = params[:viewport]
+
+        allowed_viewports = %w[desktop mobile]
+
+        if url.blank? || !url.is_a?(String)
+          render json: {
+            error: 'Invalid or missing url. Parameter is required.'
+          }, status: :unprocessable_content
+          return
+        end
+
+        if viewport.blank? || allowed_viewports.exclude?(viewport)
+          render json: {
+            error: "Invalid or missing viewport. Allowed values: #{allowed_viewports.join(', ')}"
+          }, status: :unprocessable_content
+          return
+        end
+
+        result = AnalyticsEngine.heatmap(@site, url: url, viewport: viewport)
         render json: result, status: :ok
       end
       # rubocop:enable Metrics/MethodLength
