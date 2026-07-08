@@ -1,7 +1,7 @@
 module Api
   module V1
     class SitesController < ApplicationController
-      before_action :set_site, only: %i[show snippet pageviews heatmap]
+      before_action :set_site, only: %i[show snippet pageviews heatmap performance]
 
       # GET /api/v1/sites
       def index
@@ -31,61 +31,56 @@ module Api
       end
 
       # GET /api/v1/sites/:id/pageviews
-      # rubocop:disable Metrics/MethodLength
       def pageviews
         period = params[:period]
         axis = params[:axis]
 
-        allowed_periods = %w[7d 30d 90d]
-        allowed_axes = %w[day week month]
+        return unless valid_enum_param?(period, %w[7d 30d 90d], 'period')
+        return unless valid_enum_param?(axis, %w[day week month], 'axis')
 
-        if period.blank? || allowed_periods.exclude?(period)
-          render json: {
-            error: "Invalid or missing period. Allowed values: #{allowed_periods.join(', ')}"
-          }, status: :unprocessable_content
-          return
-        end
-
-        if axis.blank? || allowed_axes.exclude?(axis)
-          render json: {
-            error: "Invalid or missing axis. Allowed values: #{allowed_axes.join(', ')}"
-          }, status: :unprocessable_content
-          return
-        end
-
-        result = AnalyticsEngine.pageviews(@site, period: period, axis: axis)
-        render json: result, status: :ok
+        render json: AnalyticsEngine.pageviews(@site, period: period, axis: axis), status: :ok
       end
-      # rubocop:enable Metrics/MethodLength
 
       # GET /api/v1/sites/:id/heatmap
-      # rubocop:disable Metrics/MethodLength
       def heatmap
         url = params[:url]
         viewport = params[:viewport]
 
-        allowed_viewports = %w[desktop mobile]
-
         if url.blank? || !url.is_a?(String)
-          render json: {
-            error: 'Invalid or missing url. Parameter is required.'
-          }, status: :unprocessable_content
+          render json: { error: 'Invalid or missing url. Parameter is required.' },
+                 status: :unprocessable_content
           return
         end
+        return unless valid_enum_param?(viewport, %w[desktop mobile], 'viewport')
 
-        if viewport.blank? || allowed_viewports.exclude?(viewport)
-          render json: {
-            error: "Invalid or missing viewport. Allowed values: #{allowed_viewports.join(', ')}"
-          }, status: :unprocessable_content
-          return
-        end
-
-        result = AnalyticsEngine.heatmap(@site, url: url, viewport: viewport)
-        render json: result, status: :ok
+        render json: AnalyticsEngine.heatmap(@site, url: url, viewport: viewport), status: :ok
       end
-      # rubocop:enable Metrics/MethodLength
+
+      # GET /api/v1/sites/:id/performance
+      def performance
+        period = params[:period]
+        percentile = params[:percentile]
+
+        return unless valid_enum_param?(period, %w[7d 30d 90d], 'period')
+        return unless valid_enum_param?(percentile, %w[p50 p75 p95], 'percentile')
+
+        render json: AnalyticsEngine.performance(@site, period: period, percentile: percentile), status: :ok
+      end
 
       private
+
+      # Validates a query param against its allow-list, rendering a 422 and
+      # returning false when the value is missing or not permitted. Centralizes
+      # the repeated validate-or-render pattern shared by the report actions so
+      # each stays small and the class remains within Metrics/ClassLength.
+      def valid_enum_param?(value, allowed, label)
+        return true if value.present? && allowed.include?(value)
+
+        render json: {
+          error: "Invalid or missing #{label}. Allowed values: #{allowed.join(', ')}"
+        }, status: :unprocessable_content
+        false
+      end
 
       # Serialize concurrent creates for this user so the 10-site cap cannot be
       # bypassed by requests that each observe count < LIMIT before either insert

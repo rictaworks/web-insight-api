@@ -293,4 +293,83 @@ RSpec.describe 'Api::V1::SitesController', type: :request do
       end
     end
   end
+
+  describe 'GET /api/v1/sites/:id/performance' do
+    let!(:my_site) { Site.create!(name: 'My Site', url: 'https://my.com', user: user) }
+    let!(:other_site) { Site.create!(name: 'Other Site', url: 'https://other.com', user: other_user) }
+
+    context 'when unauthenticated' do
+      it 'returns 401 unauthorized' do
+        get "/api/v1/sites/#{my_site.id}/performance?period=7d&percentile=p75", headers: unauth_headers
+        expect(response).to have_http_status(:unauthorized)
+      end
+    end
+
+    context 'when authenticated' do
+      it 'returns 403 forbidden if site belongs to other user' do
+        get "/api/v1/sites/#{other_site.id}/performance?period=7d&percentile=p75", headers: auth_headers
+        expect(response).to have_http_status(:forbidden)
+      end
+
+      it 'returns 404 not found if site does not exist' do
+        get '/api/v1/sites/non_existent_uuid/performance?period=7d&percentile=p75', headers: auth_headers
+        expect(response).to have_http_status(:not_found)
+      end
+
+      it 'returns 422 if period is missing or invalid' do
+        get "/api/v1/sites/#{my_site.id}/performance?percentile=p75", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body['error']).to include('Invalid or missing period')
+
+        get "/api/v1/sites/#{my_site.id}/performance?period=invalid&percentile=p75", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_content)
+      end
+
+      it 'returns 422 if percentile is missing or invalid' do
+        get "/api/v1/sites/#{my_site.id}/performance?period=7d", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body['error']).to include('Invalid or missing percentile')
+
+        get "/api/v1/sites/#{my_site.id}/performance?period=7d&percentile=invalid", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_content)
+      end
+
+      it 'returns 200 and performance data if parameters are valid' do
+        session = Session.create!(site: my_site, fingerprint: 'fp1', started_at: 1.day.ago)
+        WebVital.create!(
+          site: my_site,
+          session: session,
+          page_url: 'https://my.com/home',
+          lcp_ms: 2500,
+          fid_ms: 100,
+          cls_score: 0.1,
+          ttfb_ms: 800,
+          fcp_ms: 1800,
+          created_at: 1.day.ago
+        )
+
+        get "/api/v1/sites/#{my_site.id}/performance?period=7d&percentile=p75", headers: auth_headers
+
+        expect(response).to have_http_status(:ok)
+        res = response.parsed_body
+        # Values sit exactly on the good/needs_improvement threshold, which the
+        # Web Vitals spec classifies as "good" (upper bound inclusive).
+        expect(res['lcp']).to be_present
+        expect(res['lcp']['value']).to eq(2500)
+        expect(res['lcp']['rating']).to eq('good')
+
+        expect(res['fid']['value']).to eq(100)
+        expect(res['fid']['rating']).to eq('good')
+
+        expect(res['cls']['value']).to eq(0.1)
+        expect(res['cls']['rating']).to eq('good')
+
+        expect(res['ttfb']['value']).to eq(800)
+        expect(res['ttfb']['rating']).to eq('good')
+
+        expect(res['fcp']['value']).to eq(1800)
+        expect(res['fcp']['rating']).to eq('good')
+      end
+    end
+  end
 end

@@ -61,6 +61,101 @@ RSpec.describe 'Events Collect API', type: :request do
         expect(session.channel).to eq('organic') # since referrer matches google.
       end
 
+      it 'creates a WebVital record when properties contains Core Web Vitals metrics' do
+        payload = {
+          event_type: 'pageview',
+          page_url: 'https://example.com/home',
+          recaptcha_token: 'valid_token',
+          properties: {
+            lcp_ms: 2500,
+            fid_ms: 100,
+            cls_score: 0.1,
+            ttfb_ms: 800,
+            fcp_ms: 1800
+          }
+        }.to_json
+
+        expect do
+          post '/api/v1/events/collect', params: payload, headers: auth_headers(payload)
+        end.to change(WebVital, :count).by(1)
+
+        expect(response).to have_http_status(:ok)
+        vital = WebVital.last
+        expect(vital.site_id).to eq(site.id)
+        expect(vital.page_url).to eq('https://example.com/home')
+        expect(vital.lcp_ms).to eq(2500)
+        expect(vital.fid_ms).to eq(100)
+        expect(vital.cls_score).to eq(0.1)
+        expect(vital.ttfb_ms).to eq(800)
+        expect(vital.fcp_ms).to eq(1800)
+      end
+
+      it 'returns 400 and writes nothing when Web Vitals are present but page_url is blank' do
+        payload = {
+          event_type: 'pageview',
+          recaptcha_token: 'valid_token',
+          properties: { lcp_ms: 2500 }
+        }.to_json
+
+        expect do
+          post '/api/v1/events/collect', params: payload, headers: auth_headers(payload)
+        end.to change(Event, :count).by(0)
+                                    .and change(WebVital, :count).by(0)
+
+        expect(response).to have_http_status(:bad_request)
+        expect(response.parsed_body['error']).to include('page_url is required')
+      end
+
+      it 'accepts a custom event without page_url whose property merely shares a vital alias name' do
+        # `cls` is a generic Web Vitals alias, but a non-numeric value is not a
+        # real metric — extract_vitals ignores it — so it must not trigger the
+        # page_url requirement and reject an otherwise valid custom event.
+        payload = {
+          event_type: 'custom',
+          recaptcha_token: 'valid_token',
+          properties: { cls: 'variant-b' }
+        }.to_json
+
+        expect do
+          post '/api/v1/events/collect', params: payload, headers: auth_headers(payload)
+        end.to change(Event, :count).by(1)
+                                    .and change(WebVital, :count).by(0)
+
+        expect(response).to have_http_status(:ok)
+        expect(Event.last.properties).to eq({ 'cls' => 'variant-b' })
+      end
+
+      it 'returns 400 and writes nothing when a vital value is out of the column range' do
+        payload = {
+          event_type: 'pageview',
+          page_url: 'https://example.com/home',
+          recaptcha_token: 'valid_token',
+          properties: { lcp_ms: 9_999_999_999 } # beyond 32-bit integer column
+        }.to_json
+
+        expect do
+          post '/api/v1/events/collect', params: payload, headers: auth_headers(payload)
+        end.to change(Event, :count).by(0)
+                                    .and change(WebVital, :count).by(0)
+
+        expect(response).to have_http_status(:bad_request)
+        expect(response.parsed_body['error']).to include('out of the accepted range')
+      end
+
+      it 'returns 400 when cls_score exceeds the decimal(6,4) column limit' do
+        payload = {
+          event_type: 'pageview',
+          page_url: 'https://example.com/home',
+          recaptcha_token: 'valid_token',
+          properties: { cls_score: 123.45 } # > 99.9999 max for decimal(6,4)
+        }.to_json
+
+        post '/api/v1/events/collect', params: payload, headers: auth_headers(payload)
+
+        expect(response).to have_http_status(:bad_request)
+        expect(response.parsed_body['error']).to include('out of the accepted range')
+      end
+
       it 'associates subsequent requests within 30 minutes to the same session' do
         post '/api/v1/events/collect', params: valid_payload, headers: auth_headers(valid_payload)
         session_id1 = Event.last.session_id

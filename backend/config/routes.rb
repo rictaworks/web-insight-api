@@ -15,6 +15,7 @@ Rails.application.routes.draw do
           get :snippet
           get :pageviews
           get :heatmap
+          get :performance
         end
       end
     end

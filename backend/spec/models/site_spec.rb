@@ -83,6 +83,109 @@ RSpec.describe Site, type: :model do
       expect(snippet).to include('site_key_123')
     end
 
+    it 'collects and reports Core Web Vitals so the default install populates performance data' do
+      site = Site.create!(name: 'Test Site', url: 'https://example.com', user: user)
+      snippet = site.generate_snippet
+
+      # The default install must actually observe the vitals, otherwise WebVital
+      # rows are never created and GET /performance stays empty.
+      expect(snippet).to include('PerformanceObserver')
+      expect(snippet).to include('largest-contentful-paint')
+      expect(snippet).to include('first-input')
+      expect(snippet).to include('layout-shift')
+
+      # And it must ship them to the collector as the vital property keys the
+      # backend recognises, on a custom event.
+      expect(snippet).to include('lcp_ms')
+      expect(snippet).to include('fid_ms')
+      expect(snippet).to include('cls_score')
+      expect(snippet).to include('ttfb_ms')
+      expect(snippet).to include('fcp_ms')
+      expect(snippet).to include("trackEvent('custom'")
+    end
+
+    it 'sends the vitals report on an unload-safe keepalive path' do
+      site = Site.create!(name: 'Test Site', url: 'https://example.com', user: user)
+      snippet = site.generate_snippet
+
+      # The single vitals report fires from the hidden/pagehide path; the fetch
+      # must be marked keepalive so the browser does not cancel it during unload.
+      expect(snippet).to include('keepalive')
+    end
+
+    it 'processes pending observer records before disconnecting on flush' do
+      site = Site.create!(name: 'Test Site', url: 'https://example.com', user: user)
+      snippet = site.generate_snippet
+
+      # takeRecords() drains entries queued right before hide; they must be run
+      # through the metric callback, not discarded.
+      expect(snippet).to include('takeRecords')
+      expect(snippet).to match(/\.forEach\(\s*\w+\.callback\s*\)/)
+    end
+
+    it 'tags the internal vitals ping so traffic aggregation can exclude it' do
+      site = Site.create!(name: 'Test Site', url: 'https://example.com', user: user)
+      snippet = site.generate_snippet
+
+      # The vitals payload is sent as a custom event; it must carry the marker
+      # property AnalyticsEngine filters on, so its unload-time session is never
+      # counted as a zero-pageview traffic session.
+      expect(snippet).to include("#{EventCollector::INTERNAL_VITALS_PROPERTY}\": true")
+    end
+
+    it 're-signs the drained vitals synchronously so no await precedes the unload fetch' do
+      site = Site.create!(name: 'Test Site', url: 'https://example.com', user: user)
+      snippet = site.generate_snippet
+
+      # When takeRecords() yields final metrics at hide, the request is re-signed
+      # with a synchronous HMAC (not the async WebCrypto path) so the freshest
+      # vitals are sent and the keepalive fetch is fired with zero awaits — a
+      # browser will not keep an unloading page alive for a promise callback.
+      expect(snippet).to include('buildSignedRequestSync')
+      expect(snippet).to include('hmacSha256Hex')
+      expect(snippet).to match(/drainedNewRecords/)
+    end
+
+    it 'computes CLS using the session-window maximum, not the lifetime sum' do
+      site = Site.create!(name: 'Test Site', url: 'https://example.com', user: user)
+      snippet = site.generate_snippet
+
+      # Core Web Vitals defines CLS as the max session-window sum (1s gap / 5s
+      # cap), so the snippet must track session state rather than a running total.
+      expect(snippet).to include('sessionValue')
+      expect(snippet).to include('1000') # 1s gap between shifts
+      expect(snippet).to include('5000') # 5s session cap
+    end
+
+    it 'reports CLS as null when the layout-shift entry type is unsupported' do
+      site = Site.create!(name: 'Test Site', url: 'https://example.com', user: user)
+      snippet = site.generate_snippet
+
+      # Starts as null (not measured) and only becomes a numeric 0 when the
+      # layout-shift observer registers, so unsupported browsers do not report a
+      # misleadingly "good" CLS of 0.
+      expect(snippet).to include('cls_score: null')
+      expect(snippet).to include('clsSupported')
+      expect(snippet).to match(/if\s*\(\s*clsSupported\s*\)\s*\{\s*vitals\.cls_score\s*=\s*0/)
+    end
+
+    it 'sends the vitals report from a pre-signed request without awaiting reCAPTCHA at unload' do
+      site = Site.create!(name: 'Test Site', url: 'https://example.com', user: user)
+      snippet = site.generate_snippet
+
+      # The signed request is prepared ahead of time and fired synchronously in
+      # flush, so no reCAPTCHA/crypto await sits before the keepalive fetch on
+      # the unload path where it could be abandoned.
+      expect(snippet).to include('prepareVitalsRequest')
+      expect(snippet).to include('buildSignedRequest')
+      expect(snippet).to include('sendSignedRequest(preparedRequest')
+      # The reCAPTCHA token is pre-acquired (not awaited at flush) and refreshed
+      # on an interval so it cannot expire before use.
+      expect(snippet).to include('refreshVitalsToken')
+      expect(snippet).to include('recaptchaToken: vitalsToken')
+      expect(snippet).to match(/setInterval\(/)
+    end
+
     it 'still sends a recaptcha_token field even when no site key is configured' do
       allow(ENV).to receive(:[]).and_call_original
       allow(ENV).to receive(:[]).with('RECAPTCHA_SITE_KEY').and_return(nil)

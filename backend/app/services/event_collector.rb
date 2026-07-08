@@ -1,9 +1,43 @@
-# rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+# rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ClassLength
 class EventCollector
   class ValidationError < StandardError; end
 
   ALLOWED_EVENT_TYPES = %w[pageview click scroll custom].freeze
   SCALAR_STRING_FIELDS = %w[user_agent referrer fingerprint page_url recaptcha_token occurred_at].freeze
+
+  # Marker property the tracking snippet stamps onto its internal Web Vitals
+  # ping. The ping is sent as a normal custom event so it can reuse the collect
+  # endpoint and populate WebVital rows, but traffic aggregation must exclude it
+  # (see AnalyticsEngine): a page held open past the session cutoff produces a
+  # fresh session whose only event is this unload ping, which would otherwise
+  # inflate session totals with zero-pageview sessions. Single source of truth
+  # shared by SnippetBuilder (emits it) and AnalyticsEngine (filters on it).
+  INTERNAL_VITALS_PROPERTY = 'wia_vitals'.freeze
+
+  # Web Vitals metric target column => accepted property source keys. Shared by
+  # validate! (to require page_url up front) and the persistence branch so the
+  # two never drift.
+  VITAL_KEY_GROUPS = {
+    lcp_ms: %w[lcp_ms lcp],
+    fid_ms: %w[fid_ms fid],
+    cls_score: %w[cls_score cls],
+    ttfb_ms: %w[ttfb_ms ttfb],
+    fcp_ms: %w[fcp_ms fcp]
+  }.freeze
+
+  # Accepted value ranges per vital column, matching the DB column types. The
+  # integer columns are 32-bit (PostgreSQL integer), and cls_score is a
+  # decimal(6,4). Client-supplied values outside these ranges are rejected with
+  # a 400 in validate! so WebVital.create! can never raise mid-insert.
+  PG_INTEGER_MAX = 2_147_483_647
+  CLS_SCORE_MAX = 99.9999
+  VITAL_RANGES = {
+    lcp_ms: (0..PG_INTEGER_MAX),
+    fid_ms: (0..PG_INTEGER_MAX),
+    cls_score: (0.0..CLS_SCORE_MAX),
+    ttfb_ms: (0..PG_INTEGER_MAX),
+    fcp_ms: (0..PG_INTEGER_MAX)
+  }.freeze
 
   def self.collect(payload, site_id:, fallback_user_agent:, ip:, fallback_referrer:)
     # 1. Validate payload fields (must run before any payload[...] access below)
@@ -44,20 +78,41 @@ class EventCollector
       payload: payload
     )
 
-    # 6. Create the event
-    event = Event.create!(
-      site_id: site_id,
-      session_id: session.id,
-      event_type: payload['event_type'],
-      page_url: payload['page_url'],
-      referrer: referrer,
-      user_agent: user_agent,
-      properties: sanitize_properties(payload['properties']),
-      x_ratio: payload['x_ratio'],
-      y_ratio: payload['y_ratio'],
-      is_bot: is_bot,
-      occurred_at: parse_occurred_at(payload['occurred_at'])
-    )
+    # 6. Create the event and its Web Vitals in one transaction. validate! has
+    # already rejected out-of-range vital values with a 400, but wrapping both
+    # writes guarantees that any unforeseen failure on the WebVital insert can
+    # never leave a partial write (an Event row with no matching vitals).
+    vitals = extract_vitals(payload['properties'])
+    occurred_at = parse_occurred_at(payload['occurred_at'])
+
+    event = ActiveRecord::Base.transaction do
+      created_event = Event.create!(
+        site_id: site_id,
+        session_id: session.id,
+        event_type: payload['event_type'],
+        page_url: payload['page_url'],
+        referrer: referrer,
+        user_agent: user_agent,
+        properties: sanitize_properties(payload['properties']),
+        x_ratio: payload['x_ratio'],
+        y_ratio: payload['y_ratio'],
+        is_bot: is_bot,
+        occurred_at: occurred_at
+      )
+
+      if vitals.values.any?
+        WebVital.create!(
+          vitals.merge(
+            site_id: site_id,
+            session_id: session.id,
+            page_url: payload['page_url'],
+            created_at: occurred_at
+          )
+        )
+      end
+
+      created_event
+    end
 
     # 7. Update site to verified if it is not already
     site = Site.find_by(id: site_id)
@@ -114,6 +169,20 @@ class EventCollector
       end
     end
 
+    # Web Vitals require a page_url. Without this check a payload carrying a
+    # vital metric but no page_url passes validation, persists the Event, then
+    # blows up on WebVital's page_url presence validation — a 500 with a partial
+    # write. Fail fast here with a clean 400 before anything is written.
+    if properties.is_a?(Hash) && vital_present?(properties) && payload['page_url'].blank?
+      raise ValidationError, 'page_url is required when Web Vitals metrics are present'
+    end
+
+    # Web Vitals range validations. A parseable but out-of-range value (e.g.
+    # lcp_ms beyond the 32-bit integer column, or cls_score above decimal(6,4))
+    # would otherwise raise on WebVital.create! after the Event is inserted.
+    # Reject it here with a 400 so no partial write occurs.
+    validate_vital_ranges!(properties)
+
     # x_ratio and y_ratio range validations (0.0 to 1.0).
     # `.present?` treats `false` as blank, which used to let it skip
     # validation entirely and get cast to 0.0 by ActiveRecord as if it were
@@ -137,6 +206,52 @@ class EventCollector
     properties.stringify_keys
   end
 
-  private_class_method :validate!, :sanitize_properties, :parse_occurred_at
+  # True when the properties hash carries a PARSEABLE Web Vitals metric — the
+  # same values extract_vitals would persist. Used by validate! to require
+  # page_url only when a real metric is present. A custom property that merely
+  # shares a generic vital alias name but holds a non-numeric value (e.g.
+  # cls: "foo") is unparseable and ignored downstream, so it must not newly
+  # reject an otherwise valid custom event that omits page_url.
+  def self.vital_present?(properties)
+    extract_vitals(properties).values.any?
+  end
+
+  # Parses the Web Vitals metrics out of the properties hash into their target
+  # columns. cls_score is a float; the others are integers. Unparseable or
+  # absent values become nil so a single bad metric does not reject the rest.
+  def self.extract_vitals(properties)
+    return VITAL_KEY_GROUPS.transform_values { nil } unless properties.is_a?(Hash)
+
+    VITAL_KEY_GROUPS.each_with_object({}) do |(column, keys), acc|
+      raw = keys.filter_map { |key| properties[key] }.first
+      acc[column] =
+        if raw.blank?
+          nil
+        elsif column == :cls_score
+          Kernel.Float(raw, exception: false)
+        else
+          Kernel.Integer(raw, exception: false)
+        end
+    end
+  end
+
+  # Rejects parseable Web Vitals values that fall outside their DB column range
+  # with a 400. Reuses extract_vitals, so absent/unparseable values (already
+  # nil there) are skipped and only real, storable-looking numbers are checked.
+  def self.validate_vital_ranges!(properties)
+    return unless properties.is_a?(Hash)
+
+    extract_vitals(properties).each do |column, value|
+      next if value.nil?
+
+      range = VITAL_RANGES[column]
+      next if range.cover?(value)
+
+      raise ValidationError, "#{column} is out of the accepted range #{range} (got: #{value})"
+    end
+  end
+
+  private_class_method :validate!, :sanitize_properties, :parse_occurred_at, :vital_present?, :extract_vitals,
+                       :validate_vital_ranges!
 end
-# rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+# rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ClassLength
