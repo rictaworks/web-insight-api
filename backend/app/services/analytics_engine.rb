@@ -22,6 +22,14 @@ class AnalyticsEngine
     end
   end
 
+  def self.performance(site, period:, percentile:)
+    cache_key = "performance_#{site.id}_#{period}_#{percentile}"
+
+    Rails.cache.fetch(cache_key, expires_in: CACHE_TTL) do
+      new(site, period: period, axis: nil).calculate_performance(percentile: percentile)
+    end
+  end
+
   def self.mobile_user_agent?(user_agent)
     return false if user_agent.blank?
 
@@ -72,8 +80,9 @@ class AnalyticsEngine
                           .where(occurred_at: current_start..current_end)
                           .select(
                             'events.id, events.event_type, events.session_id, ' \
-                            'events.occurred_at, sessions.fingerprint'
+                            'events.occurred_at, events.properties, sessions.fingerprint'
                           ).to_a
+    current_events = reject_internal_vitals(current_events)
 
     # Fetch events for previous period (excluding bots; see note above on session flag)
     previous_events = @site.events
@@ -81,8 +90,10 @@ class AnalyticsEngine
                            .where(events: { is_bot: false })
                            .where(sessions: { is_bot: false })
                            .where(occurred_at: previous_start...previous_end)
-                           .select('events.id, events.event_type, events.session_id, sessions.fingerprint')
+                           .select('events.id, events.event_type, events.session_id, ' \
+                                   'events.properties, sessions.fingerprint')
                            .to_a
+    previous_events = reject_internal_vitals(previous_events)
 
     # Totals for current period
     current_pv = current_events.count { |e| e.event_type == 'pageview' }
@@ -179,7 +190,54 @@ class AnalyticsEngine
     }
   end
 
+  def calculate_performance(percentile:)
+    now = Time.current
+    current_start, current_end, = calculate_ranges(now, @period)
+
+    vitals = @site.web_vitals
+                  .joins(:session)
+                  .where(sessions: { is_bot: false })
+                  .where(web_vitals: { created_at: current_start..current_end })
+                  .to_a
+
+    lcp_values = vitals.map(&:lcp_ms).compact
+    fid_values = vitals.map(&:fid_ms).compact
+    cls_values = vitals.map(&:cls_score).compact.map(&:to_f)
+    ttfb_values = vitals.map(&:ttfb_ms).compact
+    fcp_values = vitals.map(&:fcp_ms).compact
+
+    lcp_pct = calculate_percentile(lcp_values, percentile)
+    fid_pct = calculate_percentile(fid_values, percentile)
+    cls_pct = calculate_percentile(cls_values, percentile)
+    ttfb_pct = calculate_percentile(ttfb_values, percentile)
+    fcp_pct = calculate_percentile(fcp_values, percentile)
+
+    # Classify from the raw percentile, not the rounded display value: a value
+    # just over a threshold (e.g. LCP 2500.25) would otherwise round down to the
+    # boundary (2500) and be misrated as good instead of needs_improvement.
+    {
+      lcp: { value: lcp_pct&.round, rating: classify_lcp(lcp_pct) },
+      fid: { value: fid_pct&.round, rating: classify_fid(fid_pct) },
+      cls: { value: cls_pct&.round(4), rating: classify_cls(cls_pct) },
+      ttfb: { value: ttfb_pct&.round, rating: classify_ttfb(ttfb_pct) },
+      fcp: { value: fcp_pct&.round, rating: classify_fcp(fcp_pct) }
+    }
+  end
+
   private
+
+  # Drops the tracking snippet's internal Web Vitals pings from a traffic event
+  # set. Those pings are ingested as ordinary custom events (so they can create
+  # WebVital rows), but counting them as PV/UV/session would inflate session
+  # totals with zero-pageview sessions whenever a page is held open past the
+  # session cutoff and the unload ping starts a fresh session. Identified by the
+  # marker property the snippet stamps (see EventCollector::INTERNAL_VITALS_PROPERTY).
+  def reject_internal_vitals(events)
+    marker = EventCollector::INTERNAL_VITALS_PROPERTY
+    events.reject do |event|
+      event.properties.is_a?(Hash) && event.properties[marker]
+    end
+  end
 
   # Non-bot click events whose raw page_url normalizes to `url`, bounded in SQL
   # to this page's exact spellings only. `url` is already normalized
@@ -283,6 +341,92 @@ class AnalyticsEngine
       ((current - previous) / previous.to_f * 100).round(2)
     else
       current.positive? ? 100.0 : 0.0
+    end
+  end
+
+  def calculate_percentile(values, percentile_str)
+    return nil if values.empty?
+
+    sorted = values.sort
+
+    p = case percentile_str
+        when 'p50' then 0.50
+        when 'p75' then 0.75
+        when 'p95' then 0.95
+        else raise ArgumentError, "Invalid percentile: #{percentile_str}"
+        end
+
+    n = sorted.size
+    return sorted[0].to_f if n == 1
+
+    i = p * (n - 1)
+    k = i.floor
+    d = i - k
+
+    if k >= n - 1
+      sorted[n - 1].to_f
+    else
+      (sorted[k] + (d * (sorted[k + 1] - sorted[k]))).to_f
+    end
+  end
+
+  def classify_lcp(val)
+    return nil if val.nil?
+
+    if val <= 2500
+      'good'
+    elsif val <= 4000
+      'needs_improvement'
+    else
+      'poor'
+    end
+  end
+
+  def classify_fid(val)
+    return nil if val.nil?
+
+    if val <= 100
+      'good'
+    elsif val <= 300
+      'needs_improvement'
+    else
+      'poor'
+    end
+  end
+
+  def classify_cls(val)
+    return nil if val.nil?
+
+    if val <= 0.1
+      'good'
+    elsif val <= 0.25
+      'needs_improvement'
+    else
+      'poor'
+    end
+  end
+
+  def classify_ttfb(val)
+    return nil if val.nil?
+
+    if val <= 800
+      'good'
+    elsif val <= 1800
+      'needs_improvement'
+    else
+      'poor'
+    end
+  end
+
+  def classify_fcp(val)
+    return nil if val.nil?
+
+    if val <= 1800
+      'good'
+    elsif val <= 3000
+      'needs_improvement'
+    else
+      'poor'
     end
   end
 end

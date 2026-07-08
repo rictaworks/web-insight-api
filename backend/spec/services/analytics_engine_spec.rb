@@ -50,6 +50,28 @@ RSpec.describe AnalyticsEngine, type: :service do
         expect(result[:totals][:session]).to eq(2) # late_bot_session must not be counted
       end
 
+      it 'excludes the internal Web Vitals ping from traffic totals and series' do
+        # A page held open past the session cutoff sends its unload vitals ping
+        # as a custom event, which SessionManager lands in a fresh session. That
+        # zero-pageview session must not inflate session/uv totals.
+        vitals_session = Session.create!(site: site, fingerprint: 'fp_vitals', started_at: 1.day.ago)
+        Event.create!(
+          site: site, session: vitals_session, event_type: 'custom', occurred_at: 1.day.ago, is_bot: false,
+          properties: { 'lcp_ms' => 2400, EventCollector::INTERNAL_VITALS_PROPERTY => true }
+        )
+
+        result = AnalyticsEngine.pageviews(site, period: '7d', axis: 'day')
+
+        # Unchanged from the baseline below: the vitals ping and its session are ignored.
+        expect(result[:totals][:pv]).to eq(2)
+        expect(result[:totals][:uv]).to eq(2) # fp_vitals must not be counted
+        expect(result[:totals][:session]).to eq(2) # vitals_session must not be counted
+
+        label_1d = 1.day.ago.in_time_zone.strftime('%Y-%m-%d')
+        dp_1d = result[:series].find { |dp| dp[:label] == label_1d }
+        expect(dp_1d[:session]).to eq(1) # only session1, not vitals_session
+      end
+
       it 'aggregates pageviews correctly' do
         result = AnalyticsEngine.pageviews(site, period: '7d', axis: 'day')
 
@@ -223,6 +245,147 @@ RSpec.describe AnalyticsEngine, type: :service do
         expect(result[:grid][4][2]).to eq(4) # all four root spellings
         expect(result[:grid][10][10]).to eq(0) # /about must not appear
         expect(result[:max_count]).to eq(4)
+      end
+    end
+  end
+
+  describe '.performance' do
+    it 'caches the result for 5 minutes' do
+      expect(Rails.cache).to receive(:fetch).with("performance_#{site.id}_7d_p75",
+                                                  expires_in: 5.minutes).and_call_original
+      AnalyticsEngine.performance(site, period: '7d', percentile: 'p75')
+    end
+
+    context 'with WebVitals records' do
+      let!(:session) { Session.create!(site: site, fingerprint: 'fp1', started_at: 1.day.ago) }
+      let!(:bot_session) { Session.create!(site: site, fingerprint: 'fp_bot', is_bot: true, started_at: 1.day.ago) }
+
+      before do
+        [1000, 2000, 3000, 4000, 5000].each_with_index do |lcp, idx|
+          WebVital.create!(
+            site: site,
+            session: session,
+            page_url: 'https://mysite.com/home',
+            lcp_ms: lcp,
+            fid_ms: 50 + (idx * 50),
+            cls_score: 0.05 + (idx * 0.05),
+            ttfb_ms: 100 + (idx * 100),
+            fcp_ms: 500 + (idx * 500),
+            created_at: 1.day.ago
+          )
+        end
+
+        WebVital.create!(
+          site: site,
+          session: bot_session,
+          page_url: 'https://mysite.com/home',
+          lcp_ms: 100,
+          created_at: 1.day.ago
+        )
+
+        WebVital.create!(
+          site: site,
+          session: session,
+          page_url: 'https://mysite.com/home',
+          lcp_ms: 9999,
+          created_at: 10.days.ago
+        )
+      end
+
+      it 'calculates the 75th percentile (p75) values and ratings correctly' do
+        result = AnalyticsEngine.performance(site, period: '7d', percentile: 'p75')
+
+        expect(result[:lcp][:value]).to eq(4000)
+        expect(result[:lcp][:rating]).to eq('needs_improvement')
+
+        expect(result[:fid][:value]).to eq(200)
+        expect(result[:fid][:rating]).to eq('needs_improvement')
+
+        expect(result[:cls][:value]).to eq(0.20)
+        expect(result[:cls][:rating]).to eq('needs_improvement')
+
+        expect(result[:ttfb][:value]).to eq(400)
+        expect(result[:ttfb][:rating]).to eq('good')
+
+        expect(result[:fcp][:value]).to eq(2000)
+        expect(result[:fcp][:rating]).to eq('needs_improvement')
+      end
+
+      it 'calculates p50 correctly' do
+        result = AnalyticsEngine.performance(site, period: '7d', percentile: 'p50')
+
+        expect(result[:lcp][:value]).to eq(3000)
+        expect(result[:lcp][:rating]).to eq('needs_improvement')
+      end
+
+      it 'calculates p95 correctly' do
+        result = AnalyticsEngine.performance(site, period: '7d', percentile: 'p95')
+
+        expect(result[:lcp][:value]).to eq(4800)
+        expect(result[:lcp][:rating]).to eq('poor')
+      end
+    end
+
+    context 'with no WebVitals data' do
+      it 'returns nil values and ratings' do
+        result = AnalyticsEngine.performance(site, period: '7d', percentile: 'p75')
+
+        %i[lcp fid cls ttfb fcp].each do |metric|
+          expect(result[metric][:value]).to be_nil
+          expect(result[metric][:rating]).to be_nil
+        end
+      end
+    end
+
+    context 'with values exactly on the good/needs_improvement threshold' do
+      let!(:session) { Session.create!(site: site, fingerprint: 'fp_boundary', started_at: 1.day.ago) }
+
+      before do
+        WebVital.create!(
+          site: site,
+          session: session,
+          page_url: 'https://mysite.com/home',
+          lcp_ms: 2500,
+          fid_ms: 100,
+          cls_score: 0.1,
+          ttfb_ms: 800,
+          fcp_ms: 1800,
+          created_at: 1.day.ago
+        )
+      end
+
+      it 'rates each metric at its exact threshold as good' do
+        result = AnalyticsEngine.performance(site, period: '7d', percentile: 'p75')
+
+        expect(result[:lcp][:rating]).to eq('good')
+        expect(result[:fid][:rating]).to eq('good')
+        expect(result[:cls][:rating]).to eq('good')
+        expect(result[:ttfb][:rating]).to eq('good')
+        expect(result[:fcp][:rating]).to eq('good')
+      end
+    end
+
+    context 'with an interpolated percentile just over a threshold' do
+      let!(:session) { Session.create!(site: site, fingerprint: 'fp_interp', started_at: 1.day.ago) }
+
+      before do
+        # p75 of these four values interpolates to 2500.25 ms:
+        # sorted[2] + 0.25 * (sorted[3] - sorted[2]) = 2500 + 0.25 = 2500.25.
+        [1000, 2000, 2500, 2501].each do |lcp|
+          WebVital.create!(
+            site: site, session: session, page_url: 'https://mysite.com/home',
+            lcp_ms: lcp, created_at: 1.day.ago
+          )
+        end
+      end
+
+      it 'classifies from the raw percentile, not the rounded display value' do
+        result = AnalyticsEngine.performance(site, period: '7d', percentile: 'p75')
+
+        # 2500.25 rounds to 2500 for display, but exceeds the 2500 good threshold
+        # so it must be rated needs_improvement, not good.
+        expect(result[:lcp][:value]).to eq(2500)
+        expect(result[:lcp][:rating]).to eq('needs_improvement')
       end
     end
   end
