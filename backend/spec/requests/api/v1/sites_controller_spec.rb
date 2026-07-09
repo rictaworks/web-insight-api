@@ -90,6 +90,24 @@ RSpec.describe 'Api::V1::SitesController', type: :request do
         end
       end
 
+      context 'with a malformed payload shape' do
+        it 'returns 400 when the site key is a scalar instead of an object' do
+          expect do
+            post '/api/v1/sites', params: '{"site":"abc"}', headers: auth_headers
+          end.not_to change(Site, :count)
+
+          expect(response).to have_http_status(:bad_request)
+          expect(response.parsed_body['error']).to be_present
+        end
+
+        it 'returns 400 when the site key is missing entirely' do
+          post '/api/v1/sites', params: '{"notsite":{}}', headers: auth_headers
+
+          expect(response).to have_http_status(:bad_request)
+          expect(response.parsed_body['error']).to be_present
+        end
+      end
+
       context 'when site limit is reached' do
         before do
           10.times do |i|

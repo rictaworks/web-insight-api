@@ -67,7 +67,7 @@ module Api
       end
 
       def funnel_params
-        permitted = params.require(:funnel).permit(:name)
+        permitted = require_object_params(:funnel).permit(:name)
         permitted[:steps] = permitted_steps
         permitted
       end

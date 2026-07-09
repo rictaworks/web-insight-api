@@ -121,7 +121,7 @@ module Api
       end
 
       def site_params
-        params.require(:site).permit(:name, :url)
+        require_object_params(:site).permit(:name, :url)
       end
     end
   end

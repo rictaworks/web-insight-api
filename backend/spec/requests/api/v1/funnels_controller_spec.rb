@@ -145,6 +145,24 @@ RSpec.describe 'Api::V1::FunnelsController', type: :request do
         res = response.parsed_body
         expect(res['errors']).to be_present
       end
+
+      it 'returns 400 when the funnel key is a scalar instead of an object' do
+        scalar_params = '{"funnel":"abc","steps":["/","/checkout"]}'
+
+        expect do
+          post "/api/v1/sites/#{site.id}/funnels", params: scalar_params, headers: auth_headers
+        end.not_to change(Funnel, :count)
+
+        expect(response).to have_http_status(:bad_request)
+        expect(response.parsed_body['error']).to be_present
+      end
+
+      it 'returns 400 when the funnel key is missing entirely' do
+        post "/api/v1/sites/#{site.id}/funnels", params: '{"notfunnel":{}}', headers: auth_headers
+
+        expect(response).to have_http_status(:bad_request)
+        expect(response.parsed_body['error']).to be_present
+      end
     end
   end
 
