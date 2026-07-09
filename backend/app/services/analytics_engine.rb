@@ -2,6 +2,12 @@
 class AnalyticsEngine
   CACHE_TTL = 5.minutes
 
+  # Cap on how many session ids go into a single `WHERE session_id IN (...)`.
+  # Kept well under SQLite's default bind-variable limit (999) so retention's
+  # vitals-only lookup never fails as a site's session history grows. PostgreSQL's
+  # limit is far higher, so this batch size is comfortably safe on both.
+  VITALS_LOOKUP_BATCH_SIZE = 500
+
   def self.pageviews(site, period:, axis:)
     cache_key = "pageviews_#{site.id}_#{period}_#{axis}"
 
@@ -35,6 +41,14 @@ class AnalyticsEngine
 
     Rails.cache.fetch(cache_key, expires_in: CACHE_TTL) do
       new(site, period: period, axis: nil).calculate_funnel(funnel)
+    end
+  end
+
+  def self.retention(site, cohort_unit:)
+    cache_key = "retention_#{site.id}_#{cohort_unit}"
+
+    Rails.cache.fetch(cache_key, expires_in: CACHE_TTL) do
+      new(site, period: nil, axis: nil).calculate_retention(cohort_unit: cohort_unit)
     end
   end
 
@@ -323,6 +337,78 @@ class AnalyticsEngine
     }
   end
 
+  def calculate_retention(cohort_unit:)
+    # Fetch all non-bot sessions for the site to determine cohorts and activity.
+    sessions = @site.sessions.where(is_bot: false)
+                    .select(:id, :fingerprint, :started_at, :created_at)
+                    .to_a
+
+    # Drop sessions whose only event is the tracking snippet's internal Web Vitals
+    # ping. When a page is held open past the session cutoff, that unload ping can
+    # open a fresh non-bot session with no real interaction; counting it as a
+    # revisit inflates retention for cohorts that cross a period boundary. PV and
+    # funnel aggregation already discard these pings via reject_internal_vitals;
+    # here we discard the whole session when it carries nothing else. Sessions with
+    # no events at all are left untouched (they never held a vitals ping).
+    vitals_only_ids = vitals_only_session_ids(sessions.map(&:id))
+    sessions.reject! { |s| vitals_only_ids.include?(s.id) }
+
+    # Group sessions by fingerprint (the unique identifier for a user)
+    sessions_by_fingerprint = sessions.group_by(&:fingerprint)
+
+    user_cohorts = {}
+    user_active_periods = {}
+
+    sessions_by_fingerprint.each do |fingerprint, user_sessions|
+      period_starts = user_sessions.map do |s|
+        t = (s.started_at || s.created_at).in_time_zone
+        cohort_unit == 'week' ? t.beginning_of_week.to_date : t.beginning_of_month.to_date
+      end.uniq
+
+      user_cohorts[fingerprint] = period_starts.min
+      user_active_periods[fingerprint] = period_starts
+    end
+
+    # Determine the target cohort start dates (12 intervals ending with the current one).
+    now = Time.current.in_time_zone
+    current_start = cohort_unit == 'week' ? now.beginning_of_week.to_date : now.beginning_of_month.to_date
+
+    cohort_dates = (0..11).map do |i|
+      cohort_unit == 'week' ? current_start - i.weeks : current_start - i.months
+    end.reverse
+
+    # Build the matrix
+    matrix = cohort_dates.map do |cohort_date|
+      cohort_users_fp = user_cohorts.select { |_, start_date| start_date == cohort_date }.keys
+      cohort_size = cohort_users_fp.size
+
+      activity = (0..11).map do |p|
+        target_date = cohort_unit == 'week' ? cohort_date + p.weeks : cohort_date + p.months
+        if target_date > current_start
+          nil
+        elsif cohort_size.positive?
+          revisited_count = cohort_users_fp.count { |fp| user_active_periods[fp].include?(target_date) }
+          ((revisited_count.to_f / cohort_size) * 100.0).round(2)
+        else
+          0.0
+        end
+      end
+
+      cohort_label = cohort_unit == 'week' ? cohort_date.strftime('%Y-%m-%d') : cohort_date.strftime('%Y-%m')
+
+      {
+        cohort: cohort_label,
+        cohort_size: cohort_size,
+        activity: activity
+      }
+    end
+
+    {
+      cohort_unit: cohort_unit,
+      matrix: matrix
+    }
+  end
+
   private
 
   # Coerce funnel steps into the canonical {"type", "value"} hash. Rows persisted
@@ -362,6 +448,34 @@ class AnalyticsEngine
     marker = EventCollector::INTERNAL_VITALS_PROPERTY
     events.reject do |event|
       event.properties.is_a?(Hash) && event.properties[marker]
+    end
+  end
+
+  # Session ids whose events are ALL the internal Web Vitals ping (see
+  # reject_internal_vitals). A session appears here only when it has at least one
+  # event and none of them is a real interaction, so zero-event sessions are never
+  # flagged. Used by retention to avoid counting a vitals-only session as a revisit.
+  def vitals_only_session_ids(session_ids)
+    return Set.new if session_ids.empty?
+
+    marker = EventCollector::INTERNAL_VITALS_PROPERTY
+
+    # Look the ids up in batches. The caller can pass every historical session id,
+    # and a single `WHERE session_id IN (...)` would exceed the database's bind
+    # variable limit once a site accumulates enough sessions, failing the whole
+    # request. Slicing keeps each query bounded regardless of history size.
+    session_ids.each_slice(VITALS_LOOKUP_BATCH_SIZE).with_object(Set.new) do |batch, acc|
+      events_by_session = Event.where(session_id: batch)
+                               .select(:session_id, :properties)
+                               .to_a
+                               .group_by(&:session_id)
+
+      events_by_session.each do |session_id, session_events|
+        all_internal = session_events.all? do |event|
+          event.properties.is_a?(Hash) && event.properties[marker]
+        end
+        acc << session_id if all_internal
+      end
     end
   end
 

@@ -389,4 +389,175 @@ RSpec.describe AnalyticsEngine, type: :service do
       end
     end
   end
+
+  describe '.retention' do
+    include ActiveSupport::Testing::TimeHelpers
+
+    let(:jst) { ActiveSupport::TimeZone['Asia/Tokyo'] }
+
+    it 'caches the result for 5 minutes' do
+      expect(Rails.cache).to receive(:fetch).with("retention_#{site.id}_week",
+                                                  expires_in: 5.minutes).and_call_original
+      AnalyticsEngine.retention(site, cohort_unit: 'week')
+    end
+
+    context 'with sessions' do
+      it 'excludes bot sessions' do
+        travel_to(jst.parse('2026-07-09 12:00:00')) do
+          # Create a bot session
+          Session.create!(site: site, fingerprint: 'fp_bot', is_bot: true, started_at: 1.day.ago)
+
+          # Create a regular session
+          Session.create!(site: site, fingerprint: 'fp_regular', is_bot: false, started_at: 1.day.ago)
+
+          result = AnalyticsEngine.retention(site, cohort_unit: 'week')
+
+          # Check that fp_bot is not counted in the cohort size of the current week (2026-07-06)
+          current_cohort = result[:matrix].find { |c| c[:cohort] == '2026-07-06' }
+          expect(current_cohort[:cohort_size]).to eq(1)
+        end
+      end
+
+      it 'calculates weekly retention matrix correctly' do
+        travel_to(jst.parse('2026-07-09 12:00:00')) do # Thursday. Current week starts Monday 2026-07-06.
+          # Cohort 2 weeks ago (2026-06-22)
+          # User 1: starts 2 weeks ago, returns 1 week ago, and returns this week
+          Session.create!(site: site, fingerprint: 'user1', started_at: 2.weeks.ago)
+          Session.create!(site: site, fingerprint: 'user1', started_at: 1.week.ago)
+          Session.create!(site: site, fingerprint: 'user1', started_at: Time.current)
+
+          # User 2: starts 2 weeks ago, does not return
+          Session.create!(site: site, fingerprint: 'user2', started_at: 2.weeks.ago)
+
+          # Cohort 1 week ago (2026-06-29)
+          # User 3: starts 1 week ago, returns this week
+          Session.create!(site: site, fingerprint: 'user3', started_at: 1.week.ago)
+          Session.create!(site: site, fingerprint: 'user3', started_at: Time.current)
+
+          # Cohort this week (2026-07-06)
+          # User 4: starts this week
+          Session.create!(site: site, fingerprint: 'user4', started_at: Time.current)
+
+          result = AnalyticsEngine.retention(site, cohort_unit: 'week')
+
+          # Matrix should have 12 rows
+          expect(result[:matrix].size).to eq(12)
+          expect(result[:cohort_unit]).to eq('week')
+
+          # Find specific cohorts
+          c_2w = result[:matrix].find { |c| c[:cohort] == '2026-06-22' }
+          c_1w = result[:matrix].find { |c| c[:cohort] == '2026-06-29' }
+          c_this = result[:matrix].find { |c| c[:cohort] == '2026-07-06' }
+
+          # Cohort 2 weeks ago size: 2 (user1, user2)
+          expect(c_2w[:cohort_size]).to eq(2)
+          # Period 0 (same week): 100.0%
+          expect(c_2w[:activity][0]).to eq(100.0)
+          # Period 1 (1 week later): user1 active -> 1 / 2 = 50.0%
+          expect(c_2w[:activity][1]).to eq(50.0)
+          # Period 2 (2 weeks later, which is this week): user1 active -> 1 / 2 = 50.0%
+          expect(c_2w[:activity][2]).to eq(50.0)
+          # Period 3 (future): nil
+          expect(c_2w[:activity][3]).to be_nil
+
+          # Cohort 1 week ago size: 1 (user3)
+          expect(c_1w[:cohort_size]).to eq(1)
+          expect(c_1w[:activity][0]).to eq(100.0)
+          # Period 1 (1 week later): user3 active -> 1 / 1 = 100.0%
+          expect(c_1w[:activity][1]).to eq(100.0)
+          # Period 2 (future): nil
+          expect(c_1w[:activity][2]).to be_nil
+
+          # Cohort this week size: 1 (user4)
+          expect(c_this[:cohort_size]).to eq(1)
+          expect(c_this[:activity][0]).to eq(100.0)
+          # Period 1 (future): nil
+          expect(c_this[:activity][1]).to be_nil
+        end
+      end
+
+      it 'excludes sessions whose only event is the internal Web Vitals ping' do
+        travel_to(jst.parse('2026-07-09 12:00:00')) do # Current week starts 2026-07-06.
+          marker = EventCollector::INTERNAL_VITALS_PROPERTY
+
+          # User acquired last week (2026-06-29) with a real pageview.
+          cohort_session = Session.create!(site: site, fingerprint: 'u_vitals', started_at: 1.week.ago)
+          Event.create!(site: site, session: cohort_session, event_type: 'pageview', page_url: '/',
+                        occurred_at: 1.week.ago, is_bot: false)
+
+          # This week the same user only sent the tracking snippet's internal Web
+          # Vitals ping (a fresh session with no real revisit).
+          vitals_session = Session.create!(site: site, fingerprint: 'u_vitals', started_at: Time.current)
+          Event.create!(site: site, session: vitals_session, event_type: 'custom', page_url: '/',
+                        occurred_at: Time.current, is_bot: false, properties: { marker => true })
+
+          result = AnalyticsEngine.retention(site, cohort_unit: 'week')
+          c_1w = result[:matrix].find { |c| c[:cohort] == '2026-06-29' }
+
+          expect(c_1w[:cohort_size]).to eq(1)
+          expect(c_1w[:activity][0]).to eq(100.0) # acquisition week
+          # The vitals-only session this week must NOT count as a revisit.
+          expect(c_1w[:activity][1]).to eq(0.0)
+        end
+      end
+
+      it 'detects vitals-only sessions across id-lookup batches' do
+        stub_const('AnalyticsEngine::VITALS_LOOKUP_BATCH_SIZE', 1)
+        travel_to(jst.parse('2026-07-09 12:00:00')) do
+          marker = EventCollector::INTERNAL_VITALS_PROPERTY
+
+          # Three users acquired last week (real pageview), each with a vitals-only
+          # session this week. With the batch size forced to 1, the id lookup spans
+          # many batches and must still flag every vitals-only session.
+          %w[a b c].each do |suffix|
+            cohort_session = Session.create!(site: site, fingerprint: "u_#{suffix}", started_at: 1.week.ago)
+            Event.create!(site: site, session: cohort_session, event_type: 'pageview', page_url: '/',
+                          occurred_at: 1.week.ago, is_bot: false)
+
+            vitals_session = Session.create!(site: site, fingerprint: "u_#{suffix}", started_at: Time.current)
+            Event.create!(site: site, session: vitals_session, event_type: 'custom', page_url: '/',
+                          occurred_at: Time.current, is_bot: false, properties: { marker => true })
+          end
+
+          result = AnalyticsEngine.retention(site, cohort_unit: 'week')
+          c_1w = result[:matrix].find { |c| c[:cohort] == '2026-06-29' }
+
+          expect(c_1w[:cohort_size]).to eq(3)
+          expect(c_1w[:activity][0]).to eq(100.0)
+          # Every this-week session is vitals-only, so none counts as a revisit.
+          expect(c_1w[:activity][1]).to eq(0.0)
+        end
+      end
+
+      it 'calculates monthly retention matrix correctly' do
+        travel_to(jst.parse('2026-07-09 12:00:00')) do
+          # Cohort 1 month ago (2026-06-01)
+          # User 1: starts 1 month ago, returns this month (2026-07-01)
+          Session.create!(site: site, fingerprint: 'user1', started_at: 1.month.ago)
+          Session.create!(site: site, fingerprint: 'user1', started_at: Time.current)
+
+          # Cohort this month (2026-07-01)
+          # User 2: starts this month
+          Session.create!(site: site, fingerprint: 'user2', started_at: Time.current)
+
+          result = AnalyticsEngine.retention(site, cohort_unit: 'month')
+
+          expect(result[:matrix].size).to eq(12)
+          expect(result[:cohort_unit]).to eq('month')
+
+          c_1m = result[:matrix].find { |c| c[:cohort] == '2026-06' }
+          c_this = result[:matrix].find { |c| c[:cohort] == '2026-07' }
+
+          expect(c_1m[:cohort_size]).to eq(1)
+          expect(c_1m[:activity][0]).to eq(100.0)
+          expect(c_1m[:activity][1]).to eq(100.0) # active this month
+          expect(c_1m[:activity][2]).to be_nil
+
+          expect(c_this[:cohort_size]).to eq(1)
+          expect(c_this[:activity][0]).to eq(100.0)
+          expect(c_this[:activity][1]).to be_nil
+        end
+      end
+    end
+  end
 end

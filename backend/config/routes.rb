@@ -16,6 +16,7 @@ Rails.application.routes.draw do
           get :pageviews
           get :heatmap
           get :performance
+          get :retention
         end
         resources :funnels, only: %i[index create show]
       end
