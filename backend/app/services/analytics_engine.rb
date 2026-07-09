@@ -30,6 +30,14 @@ class AnalyticsEngine
     end
   end
 
+  def self.funnel(site, funnel, period:)
+    cache_key = "funnel_#{site.id}_#{funnel.id}_#{period}"
+
+    Rails.cache.fetch(cache_key, expires_in: CACHE_TTL) do
+      new(site, period: period, axis: nil).calculate_funnel(funnel)
+    end
+  end
+
   def self.mobile_user_agent?(user_agent)
     return false if user_agent.blank?
 
@@ -58,6 +66,19 @@ class AnalyticsEngine
     end
   rescue URI::InvalidURIError
     raw
+  end
+
+  def self.normalize_path(url_or_path)
+    return '' unless url_or_path.is_a?(String) && url_or_path.present?
+
+    uri = URI.parse(url_or_path)
+    path = uri.path.presence || '/'
+    path == '/' ? '/' : path.delete_suffix('/')
+  rescue URI::InvalidURIError
+    cleaned = url_or_path.split('?').first.split('#').first
+    cleaned = '/' if cleaned.blank?
+    cleaned = cleaned.delete_suffix('/') if cleaned != '/'
+    cleaned
   end
 
   def initialize(site, period:, axis:)
@@ -224,7 +245,112 @@ class AnalyticsEngine
     }
   end
 
+  def calculate_funnel(funnel)
+    now = Time.current
+    current_start, current_end = calculate_ranges(now, @period)
+
+    steps = normalize_funnel_steps(funnel.steps)
+
+    # Fetch every non-bot event in the window regardless of type: a funnel may
+    # mix URL steps (matched on page_url of pageview events) and event steps
+    # (matched on event_type), so restricting to pageviews here would make event
+    # steps unreachable. Internal Web Vitals pings are dropped so a "custom"
+    # event step is not silently satisfied by a tracking ping.
+    events = @site.events
+                  .joins(:session)
+                  .where(events: { is_bot: false })
+                  .where(sessions: { is_bot: false })
+                  .where(occurred_at: current_start..current_end)
+                  .select('events.session_id, events.event_type, events.page_url, ' \
+                          'events.occurred_at, events.properties')
+                  .order('events.occurred_at ASC')
+                  .to_a
+    events = reject_internal_vitals(events)
+
+    events_by_session = events.group_by(&:session_id)
+    step_counts = Array.new(steps.size, 0)
+
+    events_by_session.each_value do |session_events|
+      current_step_idx = 0
+      last_event_time = nil
+
+      session_events.each do |event|
+        break if current_step_idx >= steps.size
+
+        next unless step_matches?(steps[current_step_idx], event)
+        next unless last_event_time.nil? || event.occurred_at >= last_event_time
+
+        current_step_idx += 1
+        last_event_time = event.occurred_at
+      end
+
+      current_step_idx.times do |i|
+        step_counts[i] += 1
+      end
+    end
+
+    steps_data = steps.map.with_index do |step, idx|
+      count = step_counts[idx]
+      next_count = step_counts[idx + 1] || 0
+
+      if idx < steps.size - 1
+        drop_off = count - next_count
+        drop_off_rate = count.positive? ? (drop_off.to_f / count * 100.0).round(2) : 0.0
+      else
+        drop_off = 0
+        drop_off_rate = 0.0
+      end
+
+      {
+        step_number: idx + 1,
+        type: step['type'],
+        value: step['value'],
+        count: count,
+        drop_off: drop_off,
+        drop_off_rate: drop_off_rate
+      }
+    end
+
+    first_step_count = step_counts[0] || 0
+    last_step_count = step_counts.last || 0
+    completion_rate = first_step_count.positive? ? (last_step_count.to_f / first_step_count * 100.0).round(2) : 0.0
+
+    {
+      id: funnel.id,
+      name: funnel.name,
+      completion_rate: completion_rate,
+      steps: steps_data
+    }
+  end
+
   private
+
+  # Coerce funnel steps into the canonical {"type", "value"} hash. Rows persisted
+  # by the current model are already canonical; legacy string rows (or hashes
+  # with symbol keys) are tolerated so historical funnels keep analyzing.
+  def normalize_funnel_steps(raw_steps)
+    Array(raw_steps).map do |step|
+      if step.is_a?(Hash)
+        { 'type' => step['type'] || step[:type] || 'url', 'value' => step['value'] || step[:value] }
+      else
+        { 'type' => 'url', 'value' => step }
+      end
+    end
+  end
+
+  # A URL step is reached by a pageview whose normalized path equals the step's
+  # normalized value; an event step is reached by any event whose event_type
+  # equals the step's value. Funnel validation constrains event values to the
+  # collectable event types (EventCollector::ALLOWED_EVENT_TYPES), so this
+  # comparison can always be satisfied by data from /events/collect.
+  def step_matches?(step, event)
+    if step['type'] == 'event'
+      event.event_type == step['value']
+    else
+      event.event_type == 'pageview' &&
+        self.class.normalize_path(event.page_url) == self.class.normalize_path(step['value'])
+    end
+  end
 
   # Drops the tracking snippet's internal Web Vitals pings from a traffic event
   # set. Those pings are ingested as ordinary custom events (so they can create
