@@ -1,7 +1,7 @@
 module Api
   module V1
     class SitesController < ApplicationController
-      before_action :set_site, only: %i[show snippet pageviews heatmap performance]
+      before_action :set_site, only: %i[show snippet pageviews heatmap performance retention]
 
       # GET /api/v1/sites
       def index
@@ -65,6 +65,15 @@ module Api
         return unless valid_enum_param?(percentile, %w[p50 p75 p95], 'percentile')
 
         render json: AnalyticsEngine.performance(@site, period: period, percentile: percentile), status: :ok
+      end
+
+      # GET /api/v1/sites/:id/retention
+      def retention
+        cohort_unit = params[:cohort_unit]
+
+        return unless valid_enum_param?(cohort_unit, %w[week month], 'cohort_unit')
+
+        render json: AnalyticsEngine.retention(@site, cohort_unit: cohort_unit), status: :ok
       end
 
       private

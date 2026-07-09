@@ -390,4 +390,50 @@ RSpec.describe 'Api::V1::SitesController', type: :request do
       end
     end
   end
+
+  describe 'GET /api/v1/sites/:id/retention' do
+    let!(:my_site) { Site.create!(name: 'My Site', url: 'https://my.com', user: user) }
+    let!(:other_site) { Site.create!(name: 'Other Site', url: 'https://other.com', user: other_user) }
+
+    context 'when unauthenticated' do
+      it 'returns 401' do
+        get "/api/v1/sites/#{my_site.id}/retention?cohort_unit=week", headers: unauth_headers
+        expect(response).to have_http_status(:unauthorized)
+      end
+    end
+
+    context 'when authenticated' do
+      it 'returns 403 forbidden if site belongs to other user' do
+        get "/api/v1/sites/#{other_site.id}/retention?cohort_unit=week", headers: auth_headers
+        expect(response).to have_http_status(:forbidden)
+      end
+
+      it 'returns 404 not found if site does not exist' do
+        get '/api/v1/sites/non_existent_uuid/retention?cohort_unit=week', headers: auth_headers
+        expect(response).to have_http_status(:not_found)
+      end
+
+      it 'returns 422 if cohort_unit is missing or invalid' do
+        get "/api/v1/sites/#{my_site.id}/retention", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body['error']).to include('Invalid or missing cohort_unit')
+
+        get "/api/v1/sites/#{my_site.id}/retention?cohort_unit=invalid", headers: auth_headers
+        expect(response).to have_http_status(:unprocessable_content)
+      end
+
+      it 'returns 200 and retention data if parameters are valid' do
+        # Create a session
+        Session.create!(site: my_site, fingerprint: 'fp1', started_at: Time.current)
+
+        get "/api/v1/sites/#{my_site.id}/retention?cohort_unit=week", headers: auth_headers
+
+        expect(response).to have_http_status(:ok)
+        res = response.parsed_body
+        expect(res['cohort_unit']).to eq('week')
+        expect(res['matrix']).to be_present
+        expect(res['matrix'].size).to eq(12)
+      end
+    end
+  end
 end
