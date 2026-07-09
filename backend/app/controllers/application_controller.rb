@@ -1,4 +1,11 @@
 class ApplicationController < ActionController::API
+  # A malformed request body (missing required key, or the key present but not an
+  # object) must fail as a client error, not a 500. Normalize both to 400 with a
+  # consistent JSON shape instead of leaking a Ruby exception page.
+  rescue_from ActionController::ParameterMissing do |e|
+    render json: { error: "Missing or invalid parameter: #{e.param}" }, status: :bad_request
+  end
+
   before_action :authenticate_user!
 
   def current_user
@@ -10,6 +17,18 @@ class ApplicationController < ActionController::API
   end
 
   private
+
+  # Fetch a required nested-object param (e.g. params[:site]), raising
+  # ParameterMissing when the key is absent OR present but not an object.
+  # ActionController::Parameters#require returns a scalar/array value as-is, so a
+  # later #permit on it would raise NoMethodError (→ 500); guard the shape here so
+  # a body like {"site":"abc"} becomes a 400 instead.
+  def require_object_params(key)
+    value = params.require(key)
+    return value if value.is_a?(ActionController::Parameters)
+
+    raise ActionController::ParameterMissing, key
+  end
 
   def authenticate_by_token
     return mock_development_user if dev_auto_login?
