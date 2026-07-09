@@ -17,6 +17,7 @@ Rails.application.routes.draw do
           get :heatmap
           get :performance
         end
+        resources :funnels, only: %i[index create show]
       end
     end
   end
