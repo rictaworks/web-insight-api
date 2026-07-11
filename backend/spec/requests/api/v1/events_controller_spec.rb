@@ -483,6 +483,24 @@ RSpec.describe 'Events Collect API', type: :request do
         end
       end
 
+      it 'still throttles a POST carrying X-HTTP-Method-Override: GET' do
+        # Regression test: Rack::MethodOverride must run after Rack::Attack
+        # (see config/application.rb). If it ran first, this header would
+        # rewrite the request method to GET before Rack::Attack's req.post?
+        # throttles ever see it, letting an attacker bypass rate limiting on
+        # this public endpoint entirely.
+        headers = auth_headers(valid_payload).merge('X-HTTP-Method-Override' => 'GET')
+
+        freeze_time do
+          100.times do
+            post '/api/v1/events/collect', params: valid_payload, headers: headers
+          end
+
+          post '/api/v1/events/collect', params: valid_payload, headers: headers
+          expect(response).to have_http_status(:too_many_requests)
+        end
+      end
+
       it 'still throttles requests missing X-Site-Id instead of letting them retry forever' do
         headers = auth_headers(valid_payload).except('X-Site-Id')
 

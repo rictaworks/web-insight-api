@@ -29,3 +29,11 @@
 
 en:
   hello: "Hello world"
+
+  activerecord:
+    errors:
+      models:
+        bot_rule:
+          attributes:
+            base:
+              cannot_delete_last_rule: "Cannot delete the last remaining bot rule; at least one rule must exist"

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_01_215722) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_11_000000) do
   create_table "age_groups", force: :cascade do |t|
     t.string "name", null: false
     t.datetime "created_at", null: false
@@ -54,6 +54,13 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_01_215722) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["site_id"], name: "index_alert_rules_on_site_id"
+  end
+
+  create_table "bot_rules", id: :string, force: :cascade do |t|
+    t.string "pattern", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["pattern"], name: "index_bot_rules_on_pattern", unique: true
   end
 
   create_table "channel_types", force: :cascade do |t|
