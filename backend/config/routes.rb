@@ -17,9 +17,18 @@ Rails.application.routes.draw do
           get :heatmap
           get :performance
           get :retention
+          post :recommend
         end
         resources :funnels, only: %i[index create show]
         resources :alert_rules, only: %i[index create update]
+      end
+
+      namespace :admin do
+        resources :sites, only: [:index] do
+          member do
+            post :reset_ai
+          end
+        end
       end
     end
   end

@@ -21,6 +21,8 @@ gem 'bootsnap', require: false
 gem 'rack-attack'
 gem 'rack-cors'
 
+gem 'langchainrb', '~> 0.19.0'
+
 # Use postgresql in production environment
 group :production do
   gem 'pg', '~> 1.1'
