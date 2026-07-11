@@ -5,6 +5,15 @@ class EventCollector
   ALLOWED_EVENT_TYPES = %w[pageview click scroll custom].freeze
   SCALAR_STRING_FIELDS = %w[user_agent referrer fingerprint page_url recaptcha_token occurred_at].freeze
 
+  # Minimum spacing between AlertEvaluationJob enqueues for the same site.
+  # Without this, a site with any alert rule gets one full-window (24h/48h)
+  # scan queued per non-bot event, and a high-traffic site never suppresses
+  # this via cooldown alone (cooldown only guards firing, not enqueueing).
+  # AlertRuleSweepJob already re-evaluates every site on a fixed 5-minute
+  # cadence, so debouncing event-triggered evaluations to this window keeps
+  # near-real-time firing without piling up redundant scans per event.
+  ALERT_EVALUATION_DEBOUNCE = 30.seconds
+
   # Marker property the tracking snippet stamps onto its internal Web Vitals
   # ping. The ping is sent as a normal custom event so it can reuse the collect
   # endpoint and populate WebVital rows, but traffic aggregation must exclude it
@@ -118,7 +127,28 @@ class EventCollector
     site = Site.find_by(id: site_id)
     site.update!(verified: true) if site && !site.verified?
 
+    # 8. Evaluate alert rules asynchronously for non-bot events. Gated on an
+    # alert rule actually existing so sites without any configured rule (the
+    # default state) don't queue a job per event that would just load the
+    # site and return immediately. Also debounced per site (see
+    # ALERT_EVALUATION_DEBOUNCE) so a burst of events doesn't queue a full
+    # rescan per event.
+    if site && !is_bot && site.alert_rules.exists? && debounce_alert_evaluation!(site_id)
+      AlertEvaluationJob.perform_later(site_id)
+    end
+
     event
+  end
+
+  # Returns true (and claims the debounce window) only for the first caller
+  # within ALERT_EVALUATION_DEBOUNCE for this site_id. `unless_exist: true`
+  # makes the write a no-op, returning false, when another request already
+  # claimed the window first.
+  def self.debounce_alert_evaluation!(site_id)
+    Rails.cache.write(
+      "alert_evaluation_debounce:#{site_id}", true,
+      unless_exist: true, expires_in: ALERT_EVALUATION_DEBOUNCE
+    )
   end
 
   def self.parse_occurred_at(value)
@@ -252,6 +282,6 @@ class EventCollector
   end
 
   private_class_method :validate!, :sanitize_properties, :parse_occurred_at, :vital_present?, :extract_vitals,
-                       :validate_vital_ranges!
+                       :validate_vital_ranges!, :debounce_alert_evaluation!
 end
 # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ClassLength
