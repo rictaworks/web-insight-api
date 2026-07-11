@@ -488,6 +488,25 @@ RSpec.describe 'Api::V1::SitesController', type: :request do
         expect(response).to have_http_status(:too_many_requests)
         expect(response.parsed_body['error']).to eq('Limit reached')
       end
+
+      it 'returns a generic error message without leaking the raw LLM response on failure' do
+        # Regression test: LLMError messages embed the raw LLM output (e.g.
+        # "Raw content: ..."), which must never reach the client as-is —
+        # only a fixed, user-facing message should be rendered, with the
+        # detailed error left to the server log.
+        service_double = instance_double(AiRecommendationService)
+        allow(AiRecommendationService).to receive(:new).with(my_site).and_return(service_double)
+        raw_response = '{"recommendations": [{"secret_internal_field": "should not leak"}]}'
+        error_message = "Invalid recommendation item from LLM. Raw content: #{raw_response}"
+        allow(service_double).to receive(:generate_recommendations)
+          .and_raise(AiRecommendationService::LLMError.new(error_message))
+
+        post "/api/v1/sites/#{my_site.id}/recommend", headers: auth_headers
+
+        expect(response).to have_http_status(:internal_server_error)
+        expect(response.parsed_body['error']).not_to include('secret_internal_field')
+        expect(response.parsed_body['error']).not_to include('Raw content')
+      end
     end
   end
 end

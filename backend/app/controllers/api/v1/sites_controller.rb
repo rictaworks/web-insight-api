@@ -84,7 +84,7 @@ module Api
         render json: { error: e.message }, status: :too_many_requests
       rescue StandardError => e
         logger.error "[AI Recommendation Error] #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
-        render json: { error: "Failed to generate AI recommendations: #{e.message}" }, status: :internal_server_error
+        render json: { error: 'AIレコメンデーションの生成に失敗しました。時間をおいて再試行してください。' }, status: :internal_server_error
       end
 
       private
