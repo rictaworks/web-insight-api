@@ -19,6 +19,7 @@ Rails.application.routes.draw do
           get :retention
         end
         resources :funnels, only: %i[index create show]
+        resources :alert_rules, only: %i[index create update]
       end
     end
   end

@@ -1,12 +1,8 @@
 # rubocop:disable Metrics/ClassLength, Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 class AnalyticsEngine
-  CACHE_TTL = 5.minutes
+  include InternalVitalsFilter
 
-  # Cap on how many session ids go into a single `WHERE session_id IN (...)`.
-  # Kept well under SQLite's default bind-variable limit (999) so retention's
-  # vitals-only lookup never fails as a site's session history grows. PostgreSQL's
-  # limit is far higher, so this batch size is comfortably safe on both.
-  VITALS_LOOKUP_BATCH_SIZE = 500
+  CACHE_TTL = 5.minutes
 
   def self.pageviews(site, period:, axis:)
     cache_key = "pageviews_#{site.id}_#{period}_#{axis}"
@@ -350,8 +346,7 @@ class AnalyticsEngine
     # funnel aggregation already discard these pings via reject_internal_vitals;
     # here we discard the whole session when it carries nothing else. Sessions with
     # no events at all are left untouched (they never held a vitals ping).
-    vitals_only_ids = vitals_only_session_ids(sessions.map(&:id))
-    sessions.reject! { |s| vitals_only_ids.include?(s.id) }
+    sessions = reject_vitals_only_sessions(sessions)
 
     # Group sessions by fingerprint (the unique identifier for a user)
     sessions_by_fingerprint = sessions.group_by(&:fingerprint)
@@ -435,47 +430,6 @@ class AnalyticsEngine
     else
       event.event_type == 'pageview' &&
         self.class.normalize_path(event.page_url) == self.class.normalize_path(step['value'])
-    end
-  end
-
-  # Drops the tracking snippet's internal Web Vitals pings from a traffic event
-  # set. Those pings are ingested as ordinary custom events (so they can create
-  # WebVital rows), but counting them as PV/UV/session would inflate session
-  # totals with zero-pageview sessions whenever a page is held open past the
-  # session cutoff and the unload ping starts a fresh session. Identified by the
-  # marker property the snippet stamps (see EventCollector::INTERNAL_VITALS_PROPERTY).
-  def reject_internal_vitals(events)
-    marker = EventCollector::INTERNAL_VITALS_PROPERTY
-    events.reject do |event|
-      event.properties.is_a?(Hash) && event.properties[marker]
-    end
-  end
-
-  # Session ids whose events are ALL the internal Web Vitals ping (see
-  # reject_internal_vitals). A session appears here only when it has at least one
-  # event and none of them is a real interaction, so zero-event sessions are never
-  # flagged. Used by retention to avoid counting a vitals-only session as a revisit.
-  def vitals_only_session_ids(session_ids)
-    return Set.new if session_ids.empty?
-
-    marker = EventCollector::INTERNAL_VITALS_PROPERTY
-
-    # Look the ids up in batches. The caller can pass every historical session id,
-    # and a single `WHERE session_id IN (...)` would exceed the database's bind
-    # variable limit once a site accumulates enough sessions, failing the whole
-    # request. Slicing keeps each query bounded regardless of history size.
-    session_ids.each_slice(VITALS_LOOKUP_BATCH_SIZE).with_object(Set.new) do |batch, acc|
-      events_by_session = Event.where(session_id: batch)
-                               .select(:session_id, :properties)
-                               .to_a
-                               .group_by(&:session_id)
-
-      events_by_session.each do |session_id, session_events|
-        all_internal = session_events.all? do |event|
-          event.properties.is_a?(Hash) && event.properties[marker]
-        end
-        acc << session_id if all_internal
-      end
     end
   end
 

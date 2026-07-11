@@ -61,6 +61,20 @@ RSpec.describe 'Events Collect API', type: :request do
         expect(session.channel).to eq('organic') # since referrer matches google.
       end
 
+      it 'does not enqueue an AlertEvaluationJob when the site has no alert rules' do
+        expect do
+          post '/api/v1/events/collect', params: valid_payload, headers: auth_headers(valid_payload)
+        end.not_to have_enqueued_job(AlertEvaluationJob)
+      end
+
+      it 'enqueues an AlertEvaluationJob when the site has an alert rule' do
+        AlertRule.create!(site: site, metric: 'pv', condition: 'above', threshold: 10.0)
+
+        expect do
+          post '/api/v1/events/collect', params: valid_payload, headers: auth_headers(valid_payload)
+        end.to have_enqueued_job(AlertEvaluationJob).with(site.id)
+      end
+
       it 'creates a WebVital record when properties contains Core Web Vitals metrics' do
         payload = {
           event_type: 'pageview',
@@ -387,6 +401,41 @@ RSpec.describe 'Events Collect API', type: :request do
         expect(response).to have_http_status(:ok)
         expect(Event.last.is_bot).to be(true)
         expect(Session.last.is_bot).to be(true)
+      end
+    end
+
+    context 'alert evaluation debouncing' do
+      include ActiveSupport::Testing::TimeHelpers
+
+      # The test environment's cache_store is :null_store (see
+      # config/environments/test.rb), which never actually remembers a
+      # write, so it can't exercise EventCollector's debounce logic. Swap in
+      # a real in-memory store for just this context.
+      around do |example|
+        original_cache = Rails.cache
+        Rails.cache = ActiveSupport::Cache::MemoryStore.new
+        example.run
+        Rails.cache = original_cache
+      end
+
+      before { AlertRule.create!(site: site, metric: 'pv', condition: 'above', threshold: 10.0) }
+
+      it 'enqueues only one AlertEvaluationJob for a burst of events within the debounce window' do
+        expect do
+          3.times { post '/api/v1/events/collect', params: valid_payload, headers: auth_headers(valid_payload) }
+        end.to have_enqueued_job(AlertEvaluationJob).with(site.id).exactly(1).times
+      end
+
+      it 'enqueues another AlertEvaluationJob once the debounce window elapses' do
+        freeze_time do
+          post '/api/v1/events/collect', params: valid_payload, headers: auth_headers(valid_payload)
+        end
+
+        travel_to(EventCollector::ALERT_EVALUATION_DEBOUNCE.from_now + 1.second) do
+          expect do
+            post '/api/v1/events/collect', params: valid_payload, headers: auth_headers(valid_payload)
+          end.to have_enqueued_job(AlertEvaluationJob).with(site.id)
+        end
       end
     end
 
