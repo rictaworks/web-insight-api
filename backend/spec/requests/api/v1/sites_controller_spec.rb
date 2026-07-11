@@ -436,4 +436,58 @@ RSpec.describe 'Api::V1::SitesController', type: :request do
       end
     end
   end
+
+  describe 'POST /api/v1/sites/:id/recommend' do
+    let!(:my_site) { Site.create!(name: 'My Site', url: 'https://my.com', user: user) }
+    let!(:other_site) { Site.create!(name: 'Other Site', url: 'https://other.com', user: other_user) }
+
+    context 'when unauthenticated' do
+      it 'returns 401' do
+        post "/api/v1/sites/#{my_site.id}/recommend", headers: unauth_headers
+        expect(response).to have_http_status(:unauthorized)
+      end
+    end
+
+    context 'when authenticated' do
+      it 'returns 403 forbidden if site belongs to other user' do
+        post "/api/v1/sites/#{other_site.id}/recommend", headers: auth_headers
+        expect(response).to have_http_status(:forbidden)
+      end
+
+      it 'returns 404 not found if site does not exist' do
+        post '/api/v1/sites/non_existent_uuid/recommend', headers: auth_headers
+        expect(response).to have_http_status(:not_found)
+      end
+
+      it 'returns 200 and recommendations if within limit' do
+        service_double = instance_double(AiRecommendationService)
+        allow(AiRecommendationService).to receive(:new).with(my_site).and_return(service_double)
+
+        recommendations = [
+          AiRecommendation.new(site: my_site, category: 'UX', priority: 1, description: 'UX advice',
+                               estimated_impact: '高')
+        ]
+        allow(service_double).to receive(:generate_recommendations).and_return(recommendations)
+
+        post "/api/v1/sites/#{my_site.id}/recommend", headers: auth_headers
+
+        expect(response).to have_http_status(:ok)
+        res = response.parsed_body
+        expect(res['recommendations'].size).to eq(1)
+        expect(res['recommendations'].first['category']).to eq('UX')
+      end
+
+      it 'returns 429 too many requests if daily limit is reached' do
+        service_double = instance_double(AiRecommendationService)
+        allow(AiRecommendationService).to receive(:new).with(my_site).and_return(service_double)
+        allow(service_double).to receive(:generate_recommendations)
+          .and_raise(AiRecommendationService::LimitExceededError.new('Limit reached'))
+
+        post "/api/v1/sites/#{my_site.id}/recommend", headers: auth_headers
+
+        expect(response).to have_http_status(:too_many_requests)
+        expect(response.parsed_body['error']).to eq('Limit reached')
+      end
+    end
+  end
 end

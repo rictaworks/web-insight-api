@@ -1,7 +1,7 @@
 module Api
   module V1
     class SitesController < ApplicationController
-      before_action :set_site, only: %i[show snippet pageviews heatmap performance retention]
+      before_action :set_site, only: %i[show snippet pageviews heatmap performance retention recommend]
 
       # GET /api/v1/sites
       def index
@@ -76,7 +76,22 @@ module Api
         render json: AnalyticsEngine.retention(@site, cohort_unit: cohort_unit), status: :ok
       end
 
+      # POST /api/v1/sites/:id/recommend
+      def recommend
+        recommendations = AiRecommendationService.new(@site).generate_recommendations
+        render json: { recommendations: recommendations.map { |r| serialize_recommendation(r) } }, status: :ok
+      rescue AiRecommendationService::LimitExceededError => e
+        render json: { error: e.message }, status: :too_many_requests
+      rescue StandardError => e
+        logger.error "[AI Recommendation Error] #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}"
+        render json: { error: "Failed to generate AI recommendations: #{e.message}" }, status: :internal_server_error
+      end
+
       private
+
+      def serialize_recommendation(recommendation)
+        recommendation.attributes.symbolize_keys.slice(:category, :priority, :description, :estimated_impact)
+      end
 
       # Validates a query param against its allow-list, rendering a 422 and
       # returning false when the value is missing or not permitted. Centralizes

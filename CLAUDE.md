@@ -135,10 +135,13 @@ JWT_SECRET                  # 本番必須・未設定で起動不可
 FRONTEND_URL                # 本番必須・未設定で起動不可（例: https://your-app.vercel.app）
 GOOGLE_OAUTH_CLIENT_ID
 GOOGLE_OAUTH_CLIENT_SECRET
+GEMINI_API_KEY               # AI レコメンデーション（LangChain 経由の Gemini 呼び出し）に使用
 LANGSMITH_API_KEY
 DATABASE_URL
 RECAPTCHA_SITE_KEY
 RECAPTCHA_SECRET_KEY
+ADMIN_USERNAME               # 本番必須・未設定で起動不可（管理画面 BASIC 認証）
+ADMIN_PASSWORD               # 本番必須・未設定で起動不可（管理画面 BASIC 認証）
 DEV_AUTO_LOGIN              # 開発環境のみ: true で Google OAuth をバイパス（本番は false または未設定）
 ```
 

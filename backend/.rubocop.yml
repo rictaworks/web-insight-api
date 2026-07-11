@@ -18,6 +18,7 @@ AllCops:
 Metrics/BlockLength:
   Exclude:
     - "spec/**/*"
+    - "config/routes.rb"
 
 Style/Documentation:
   Enabled: false
