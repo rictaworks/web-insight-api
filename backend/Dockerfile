@@ -33,6 +33,20 @@ COPY . .
 # Precompile bootsnap code for faster boot times
 RUN bundle exec bootsnap precompile app/ lib/
 
+# Precompile assets for Rails Admin.
+# assets:precompile boots the app in RAILS_ENV=production, which trips the
+# production-only boot checks for JWT_SECRET / FRONTEND_URL / ADMIN_USERNAME
+# / ADMIN_PASSWORD (see config/initializers/require_jwt_secret.rb,
+# config/initializers/cors.rb, config/initializers/require_admin_credentials.rb).
+# These build-time-only dummy values never end up in the running container;
+# the real secrets are injected at runtime by the deploy platform.
+RUN SECRET_KEY_BASE_DUMMY=1 \
+    JWT_SECRET=build_time_dummy \
+    FRONTEND_URL=http://localhost \
+    ADMIN_USERNAME=build_time_dummy \
+    ADMIN_PASSWORD=build_time_dummy \
+    bundle exec rails assets:precompile
+
 
 # Final stage for app image
 FROM base

@@ -10,6 +10,15 @@ gem 'puma', '>= 5.0'
 # JWT gem for token-based authentication
 gem 'google-id-token', '~> 1.4'
 gem 'jwt', '~> 2.8'
+gem 'rails_admin', '~> 3.1.2'
+# Ships community-maintained translations (including Japanese) for RailsAdmin's
+# own UI strings, which the gem itself only provides in English.
+gem 'rails_admin-i18n'
+gem 'sprockets-rails', '>= 3.0.0'
+# rails_admin ships .scss assets; sprockets needs a Sass compiler to
+# precompile them (verified via `docker build` — assets:precompile aborts
+# with "cannot load such file -- sassc" without this).
+gem 'sassc-rails'
 
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
 gem 'tzinfo-data', platforms: %i[windows jruby]

@@ -5,6 +5,8 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get 'up' => 'rails/health#show', as: :rails_health_check
 
+  mount RailsAdmin::Engine => '/admin', as: 'rails_admin'
+
   namespace :api do
     namespace :v1 do
       post 'auth/google', to: 'auth#google'
@@ -29,6 +31,8 @@ Rails.application.routes.draw do
             post :reset_ai
           end
         end
+        resources :users, only: %i[index show]
+        resource :bot_rules, only: [:update]
       end
     end
   end

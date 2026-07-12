@@ -7,7 +7,8 @@ RSpec.describe 'Api::V1::Admin::SitesController', type: :request do
   let(:auth_headers) do
     {
       'Authorization' => ActionController::HttpAuthentication::Basic.encode_credentials(admin_user, admin_pass),
-      'Accept' => 'application/json'
+      'Accept' => 'application/json',
+      'Content-Type' => 'application/json'
     }
   end
 
@@ -92,6 +93,23 @@ RSpec.describe 'Api::V1::Admin::SitesController', type: :request do
       it 'returns 404 if site does not exist' do
         post '/api/v1/admin/sites/non_existent_uuid/reset_ai', headers: auth_headers
         expect(response).to have_http_status(:not_found)
+      end
+
+      it 'returns 415 and does not reset usage for a form-encoded request' do
+        # Regression test: this action is a native POST, so a third-party
+        # page could auto-submit a plain HTML <form> against it directly
+        # (no Rack::MethodOverride trick even needed) using the admin's
+        # browser-cached Basic Auth credentials. A <form> can only send
+        # application/x-www-form-urlencoded or multipart/form-data, never
+        # JSON, so requiring JSON here closes that path.
+        usage_date = 3.hours.ago.to_date
+        usage = site1.daily_ai_usages.create!(usage_date: usage_date, used_count: 1)
+        form_headers = auth_headers.merge('Content-Type' => 'application/x-www-form-urlencoded')
+
+        post "/api/v1/admin/sites/#{site1.id}/reset_ai", headers: form_headers
+
+        expect(response).to have_http_status(:unsupported_media_type)
+        expect(usage.reload.used_count).to eq(1)
       end
     end
   end

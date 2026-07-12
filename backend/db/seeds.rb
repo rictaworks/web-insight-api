@@ -34,3 +34,17 @@ age_groups.each do |name|
 end
 
 Rails.logger.debug 'Master data seeded successfully.'
+
+# Unlike the master data above, bot_rules is mutable configuration that
+# admins edit via Admin::BotRulesController / RailsAdmin. Seeding must only
+# populate the initial defaults when the table is empty, otherwise rerunning
+# db:seed would silently recreate any default pattern an admin removed.
+if BotRule.none?
+  bot_rules = %w[
+    bot spider crawler lighthouse chrome-lighthouse headlesschrome
+    slurp pingdom ia_archiver googlebot bingbot yandex bot/
+  ]
+  bot_rules.each do |pattern|
+    BotRule.find_or_create_by!(pattern: pattern)
+  end
+end

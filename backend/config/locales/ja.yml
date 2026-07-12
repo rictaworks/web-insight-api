@@ -1,0 +1,174 @@
+# Registers :ja with I18n.available_locales so RailsAdmin
+# (config/initializers/rails_admin.rb) can force I18n.locale = :ja without
+# raising I18n::InvalidLocale. RailsAdmin's own UI chrome (menus, buttons,
+# filters, validation messages, etc.) is translated by the rails_admin-i18n
+# gem; the activerecord.models/attributes entries below cover the
+# model/field labels that gem does not translate (RailsAdmin auto-discovers
+# every ActiveRecord model, so all of them are listed here for a fully
+# Japanese admin UI).
+ja:
+  hello: "こんにちは"
+
+  errors:
+    format: "%{attribute}%{message}"
+    messages:
+      blank: "を入力してください"
+      taken: "はすでに存在します"
+      invalid: "は不正な値です"
+      not_a_number: "は数値で入力してください"
+      not_an_integer: "は整数で入力してください"
+      greater_than_or_equal_to: "は%{count}以上の値にしてください"
+      less_than_or_equal_to: "は%{count}以下の値にしてください"
+
+  activerecord:
+    errors:
+      messages:
+        record_invalid: "バリデーションに失敗しました: %{errors}"
+      models:
+        bot_rule:
+          attributes:
+            base:
+              cannot_delete_last_rule: "最後の1件は削除できません。少なくとも1件のボットルールが必要です"
+
+    models:
+      age_group: "年齢層"
+      ai_recommendation: "AIレコメンデーション"
+      alert_log: "アラート発生履歴"
+      alert_metric_type: "アラート指標種別"
+      alert_rule: "アラートルール"
+      bot_rule: "ボットルール"
+      channel_type: "チャネル種別"
+      cwv_metric_type: "Core Web Vitals指標種別"
+      daily_ai_usage: "AI利用状況（日次）"
+      event: "イベント"
+      event_type: "イベント種別"
+      funnel: "ファネル"
+      recommendation_category: "レコメンデーションカテゴリ"
+      session: "セッション"
+      site: "サイト"
+      user: "ユーザー"
+      web_vital: "Web Vitals"
+
+    attributes:
+      age_group:
+        name: "名称"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      ai_recommendation:
+        site: "サイト"
+        site_id: "サイトID"
+        category: "カテゴリ"
+        priority: "優先度"
+        description: "説明"
+        estimated_impact: "推定インパクト"
+        generated_at: "生成日時"
+        created_at: "作成日時"
+      alert_log:
+        alert_rule: "アラートルール"
+        alert_rule_id: "アラートルールID"
+        fired_at: "発生日時"
+        metric_value: "指標値"
+        created_at: "作成日時"
+      alert_metric_type:
+        name: "名称"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      alert_rule:
+        site: "サイト"
+        site_id: "サイトID"
+        metric: "指標"
+        condition: "条件"
+        threshold: "閾値"
+        cooldown_min: "クールダウン(分)"
+        last_fired_at: "最終発生日時"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      bot_rule:
+        pattern: "パターン"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      channel_type:
+        name: "名称"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      cwv_metric_type:
+        name: "名称"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      daily_ai_usage:
+        site: "サイト"
+        site_id: "サイトID"
+        usage_date: "利用日"
+        used_count: "利用回数"
+        reset_at: "リセット日時"
+        created_at: "作成日時"
+      event:
+        site: "サイト"
+        site_id: "サイトID"
+        session: "セッション"
+        session_id: "セッションID"
+        event_type: "イベント種別"
+        page_url: "ページURL"
+        referrer: "リファラー"
+        user_agent: "ユーザーエージェント"
+        properties: "プロパティ"
+        x_ratio: "X座標比率"
+        y_ratio: "Y座標比率"
+        is_bot: "ボット判定"
+        occurred_at: "発生日時"
+        created_at: "作成日時"
+      event_type:
+        name: "名称"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      funnel:
+        site: "サイト"
+        site_id: "サイトID"
+        name: "名称"
+        steps: "ステップ"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      recommendation_category:
+        name: "名称"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      session:
+        site: "サイト"
+        site_id: "サイトID"
+        fingerprint: "フィンガープリント"
+        channel: "チャネル"
+        utm_source: "UTMソース"
+        utm_medium: "UTMメディア"
+        utm_campaign: "UTMキャンペーン"
+        is_bot: "ボット判定"
+        started_at: "開始日時"
+        last_seen_at: "最終アクセス日時"
+        created_at: "作成日時"
+      site:
+        user: "ユーザー"
+        user_id: "ユーザーID"
+        name: "サイト名"
+        url: "URL"
+        api_key: "APIキー"
+        verified: "認証済み"
+        verify_token: "認証トークン"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      user:
+        google_sub: "Google Sub"
+        display_name: "表示名"
+        created_at: "作成日時"
+        updated_at: "更新日時"
+      web_vital:
+        site: "サイト"
+        site_id: "サイトID"
+        session: "セッション"
+        session_id: "セッションID"
+        page_url: "ページURL"
+        lcp_ms: "LCP(ms)"
+        fid_ms: "FID(ms)"
+        cls_score: "CLSスコア"
+        ttfb_ms: "TTFB(ms)"
+        fcp_ms: "FCP(ms)"
+        created_at: "作成日時"
+        updated_at: "更新日時"
