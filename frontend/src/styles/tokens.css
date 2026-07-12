@@ -1,0 +1,123 @@
+:root {
+  /* ── 基本カラーパレット ── */
+  --blue-primary:  #1a4fdb;
+  --blue-dark:     #0d2f8a;
+  --blue-light:    #3b6ef8;
+  --blue-pale:     #e8eeff;
+  --blue-bg:       #f0f4ff;
+  --gold:          #f5a623;
+  --gold-light:    #ffd07a;
+
+  /* ── ニュートラル（モノクロ） ── */
+  --white:         #ffffff;
+  --bg-gray:       #f5f7fa;
+  --border:        #e2e8f0;
+  --text-dark:     #1a1f36;
+  --text-mid:      #4a5568;
+  --text-light:    #8a94a6;
+
+  /* ── セマンティック・エイリアス ── */
+  --color-primary:       var(--blue-primary);
+  --color-primary-dark:  var(--blue-dark);
+  --color-primary-light: var(--blue-light);
+  --color-accent:        var(--gold);
+  --color-accent-light:  var(--gold-light);
+
+  --surface-base:        var(--white);
+  --surface-subtle:      var(--bg-gray);
+  --surface-brand:       var(--blue-pale);
+  --surface-dark:        var(--blue-dark);
+
+  --text-heading:        var(--text-dark);
+  --text-body:           var(--text-mid);
+  --text-muted:          var(--text-light);
+  --text-on-dark:        #ffffff;
+  --text-on-dark-muted:  rgba(255, 255, 255, 0.65);
+
+  --border-default:      var(--border);
+  --border-focus:        var(--blue-primary);
+
+  /* ── フォントファミリ ── */
+  --font-display:  'Barlow Condensed', sans-serif;
+  --font-body:     'Noto Sans JP', sans-serif;
+
+  /* ── フォントウェイト ── */
+  --fw-light:      300;
+  --fw-regular:    400;
+  --fw-medium:     500;
+  --fw-bold:       700;
+  --fw-black:      900;
+
+  /* ── フォントサイズ ── */
+  --text-xs:       0.72rem;    /* 11.5px — ラベル、キャプション */
+  --text-sm:       0.82rem;    /* 13px  — カード説明 */
+  --text-base:     0.92rem;    /* 14.7px — 本文、FAQ */
+  --text-md:       1rem;       /* 16px  — デフォルト本文 */
+  --text-lg:       1.05rem;    /* 16.8px — 副見出し */
+  --text-xl:       1.35rem;    /* 21.6px — セクションタイトル（最小） */
+  --text-2xl:      1.7rem;     /* 27.2px — セクションタイトル（最大） */
+  --text-3xl:      2.2rem;     /* 35.2px — ヒーロー（最小） */
+  --text-4xl:      3.4rem;     /* 54.4px — ヒーロー（最大） */
+  --text-stat:     3.6rem;     /* 57.6px — 統計数値用 */
+
+  /* ── 行高 ── */
+  --lh-tight:      1.25;
+  --lh-normal:     1.6;
+  --lh-relaxed:    1.7;
+  --lh-loose:      1.8;
+
+  /* ── 文字間隔 ── */
+  --ls-tight:      -0.5px;
+  --ls-normal:     0;
+  --ls-wide:       0.5px;
+  --ls-wider:      1px;
+  --ls-widest:     3px;
+
+  /* ── スペーシングスケール (4px基準) ── */
+  --sp-1:    4px;
+  --sp-2:    8px;
+  --sp-3:    12px;
+  --sp-4:    16px;
+  --sp-5:    20px;
+  --sp-6:    24px;
+  --sp-7:    28px;
+  --sp-8:    32px;
+  --sp-10:   40px;
+  --sp-12:   48px;
+  --sp-14:   56px;
+  --sp-16:   64px;
+  --sp-20:   80px;
+  --sp-24:   96px;
+
+  /* ── セクションパディング ── */
+  --section-pad-y:     72px;
+  --section-pad-x:     24px;
+  --section-max-width: 1060px;
+
+  /* ── 角丸（Border Radii） ── */
+  --radius-sm:    6px;     /* ボタン、CTA */
+  --radius-md:    10px;    /* FAQアイテム */
+  --radius-lg:    12px;    /* サービス/プロセスカード */
+  --radius-xl:    14px;    /* 統計カード */
+  --radius-pill:  20px;    /* バッジ */
+  --radius-full:  9999px;  /* 円形 */
+
+  /* ── 区切り線 ── */
+  --divider-width:  48px;
+  --divider-height: 3px;
+
+  /* ── シャドウ ── */
+  --shadow-card:      0 4px 24px rgba(0, 0, 0, 0.06);
+  --shadow-card-hover: 0 12px 40px rgba(26, 79, 219, 0.12);
+  --shadow-faq:       0 2px 8px rgba(0, 0, 0, 0.04);
+
+  /* ── ボタンシャドウ ── */
+  --shadow-btn-primary:       0 8px 30px rgba(26, 79, 219, 0.5);
+  --shadow-btn-primary-hover: 0 12px 40px rgba(26, 79, 219, 0.6);
+  --shadow-btn-white:         0 8px 32px rgba(0, 0, 0, 0.25);
+
+  /* ── トランジション ── */
+  --transition-fast:   0.2s ease;
+  --transition-normal: 0.3s ease;
+  --transition-slow:   0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
