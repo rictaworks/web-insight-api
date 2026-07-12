@@ -1,7 +1,13 @@
 require 'rails_helper'
 
 RSpec.describe BotRule, type: :model do
-  before { Rails.cache.clear }
+  # db:seed populates default bot rules on a fresh database (see db/seeds.rb),
+  # and CI's db:prepare runs it before the suite starts — so these examples
+  # cannot assume the table starts empty without clearing it themselves.
+  before do
+    BotRule.delete_all
+    Rails.cache.clear
+  end
   after { Rails.cache.clear }
 
   it 'invalidates the bot_ua_keywords cache on create' do

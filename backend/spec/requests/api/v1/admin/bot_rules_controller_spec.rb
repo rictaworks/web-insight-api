@@ -21,6 +21,10 @@ RSpec.describe 'Api::V1::Admin::BotRulesController', type: :request do
 
   before do
     stub_const('ENV', ENV.to_h.merge('ADMIN_USERNAME' => admin_user, 'ADMIN_PASSWORD' => admin_pass))
+    # db:seed populates default bot rules on a fresh database (see
+    # db/seeds.rb), and CI's db:prepare runs it before the suite starts — so
+    # these examples cannot assume the table starts empty without clearing it.
+    BotRule.delete_all
     Rails.cache.clear
   end
 
